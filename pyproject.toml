@@ -1,0 +1,70 @@
+[project]
+name = "ufo-tdkit-tools"
+version = "0.1.0"
+description = "PS hints extraction, optimization, and preserve-mode compilation for UFO fonts"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Alexander Lubovenko", email = "lubovenko@gmail.com"}
+]
+
+keywords = [
+    "ufo", "font", "postscript", "hints", "cff",
+    "otf", "ttf", "compilation", "typography", "typedev"
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Multimedia :: Graphics :: Editors :: Vector-Based",
+    "Topic :: Text Processing :: Fonts",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: Apache Software License",
+]
+
+dependencies = [
+    "fontTools>=4.38.0",
+]
+
+[project.optional-dependencies]
+extraction = [
+    "fontParts>=0.10.0",
+    "defcon",
+    "ufo-extractor>=0.8.1",
+]
+compilation = [
+    "ufo2ft>=3.0.0",
+    "cffsubr",
+    "defcon",
+    "fontParts>=0.10.0",
+]
+all = [
+    "ufo-tdkit-tools[extraction,compilation]",
+]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/typedev/ufo-tdkit-tools"
+Repository = "https://github.com/typedev/ufo-tdkit-tools"
+Issues = "https://github.com/typedev/ufo-tdkit-tools/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ufo_tdkit_tools"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

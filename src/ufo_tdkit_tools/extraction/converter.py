@@ -321,6 +321,10 @@ def _extract_clean_features(
     # ── Step 3: Fix FEA text ───────────────────────────────────────────
     fea_text = _fix_languagesystem_order(fea_text)
     fea_text = _fix_aalt_blocks(fea_text)
+    fea_text = _unify_feature_blocks(fea_text)
+    fea_text = _inline_aalt_lookups(fea_text)
+    fea_text = _strip_lookup_noise(fea_text)
+    fea_text = _strip_empty_gdef(fea_text)
 
     if fea_text and fea_text.strip():
         ufo_font.features.text = fea_text
@@ -438,6 +442,270 @@ def _fix_aalt_blocks(fea_text: str) -> str:
         fea_text = re.sub(r"\n{3,}", "\n\n", fea_text)
 
     return fea_text
+
+
+def _unify_feature_blocks(fea_text: str) -> str:
+    """Merge all feature blocks of the same tag into a single block.
+
+    fontFeatures emits one ``feature TAG {…} TAG;`` block per
+    (feature, script, language, lookup) tuple. We coalesce all blocks
+    of the same tag into one, with internal script/language scoping.
+
+    Per the OpenType FEA spec (§4.b.ii) lookups declared before any
+    script statement apply to all declared languagesystems; once a
+    script/language scope is opened, subsequent lookups apply only
+    inside it. Runtime lookup application order is determined by the
+    LookupList (named-lookup-block declaration order), not by
+    reference order within a feature block, so reorganising
+    references is safe.
+
+    Three emission strategies, in order of preference:
+      1. all sections lack script/language → single defaults-only block
+         (used for aalt and any tag whose blocks fontFeatures emitted
+         without scoping);
+      2. every (script, language) scope has the same lookup list and
+         coverage equals the declared languagesystem set → collapse to
+         a single defaults-only block;
+      3. otherwise → one block with explicit ``script``/``language``
+         sections, eliding redundant ``script`` statements when the
+         previous section already used the same script.
+    """
+    import re
+
+    declared: set[tuple[str, str]] = set()
+    for m in re.finditer(
+        r"^\s*languagesystem\s+(\S+)\s+(\S+?)\s*;",
+        fea_text,
+        re.MULTILINE,
+    ):
+        declared.add((m.group(1), m.group(2)))
+
+    block_re = re.compile(
+        r"feature\s+(\w{1,4})\s*\{(.*?)\}\s*\1\s*;",
+        re.DOTALL,
+    )
+
+    blocks: list[dict] = []
+    for m in block_re.finditer(fea_text):
+        tag = m.group(1)
+        body = m.group(2)
+        sections: list[tuple[str | None, str | None, list[str]]] = []
+        cur_script: str | None = None
+        cur_language: str | None = None
+        cur_items: list[str] = []
+        for line in body.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            ms = re.match(r"script\s+(\S+?)\s*;", stripped)
+            if ms:
+                if cur_items:
+                    sections.append((cur_script, cur_language, cur_items))
+                    cur_items = []
+                cur_script = ms.group(1)
+                cur_language = "dflt"
+                continue
+            ml = re.match(
+                r"language\s+(\S+?)(?:\s+(?:include_dflt|exclude_dflt))?\s*;",
+                stripped,
+            )
+            if ml:
+                if cur_items:
+                    sections.append((cur_script, cur_language, cur_items))
+                    cur_items = []
+                cur_language = ml.group(1)
+                continue
+            cur_items.append(stripped)
+        if cur_items:
+            sections.append((cur_script, cur_language, cur_items))
+
+        blocks.append(
+            {
+                "tag": tag,
+                "sections": sections,
+                "start": m.start(),
+                "end": m.end(),
+            }
+        )
+
+    if not blocks:
+        return fea_text
+
+    per_tag_per_sl: dict[str, dict[tuple, list[str]]] = {}
+    per_tag_sl_order: dict[str, list[tuple]] = {}
+    tag_order: list[str] = []
+
+    for b in blocks:
+        tag = b["tag"]
+        if tag not in per_tag_per_sl:
+            per_tag_per_sl[tag] = {}
+            per_tag_sl_order[tag] = []
+            tag_order.append(tag)
+        for script, language, items in b["sections"]:
+            sl = (script, language)
+            if sl not in per_tag_per_sl[tag]:
+                per_tag_per_sl[tag][sl] = []
+                per_tag_sl_order[tag].append(sl)
+            per_tag_per_sl[tag][sl].extend(items)
+
+    unified: dict[str, str] = {}
+    for tag in tag_order:
+        sl_items = per_tag_per_sl[tag]
+        sl_order = per_tag_sl_order[tag]
+
+        if all(sl == (None, None) for sl in sl_order):
+            items: list[str] = []
+            for sl in sl_order:
+                items.extend(sl_items[sl])
+            body_lines = [f"    {it}" for it in items]
+            unified[tag] = f"feature {tag} {{\n" + "\n".join(body_lines) + f"\n}} {tag};"
+            continue
+
+        unique_lists = {tuple(sl_items[sl]) for sl in sl_order}
+        coverage: set[tuple[str, str]] = set()
+        for sl in sl_order:
+            if sl == (None, None):
+                coverage |= declared
+            else:
+                coverage.add((sl[0] or "DFLT", sl[1] or "dflt"))
+        if (
+            len(unique_lists) == 1
+            and declared
+            and coverage >= declared
+        ):
+            items = sl_items[sl_order[0]]
+            body_lines = [f"    {it}" for it in items]
+            unified[tag] = f"feature {tag} {{\n" + "\n".join(body_lines) + f"\n}} {tag};"
+            continue
+
+        body_parts: list[str] = []
+        prev_script: str | None = None
+        prev_language: str | None = None
+        for sl in sl_order:
+            s = sl[0] or "DFLT"
+            lang = sl[1] or "dflt"
+            if s != prev_script:
+                body_parts.append(f"    script {s};")
+                prev_script = s
+                prev_language = "dflt"
+            if lang != prev_language:
+                body_parts.append(f"    language {lang};")
+                prev_language = lang
+            for it in sl_items[sl]:
+                body_parts.append(f"        {it}")
+        unified[tag] = f"feature {tag} {{\n" + "\n".join(body_parts) + f"\n}} {tag};"
+
+    seen_tags: set[str] = set()
+    parts_out: list[str] = []
+    last_end = 0
+    for b in blocks:
+        parts_out.append(fea_text[last_end:b["start"]])
+        if b["tag"] not in seen_tags:
+            seen_tags.add(b["tag"])
+            parts_out.append(unified[b["tag"]])
+        last_end = b["end"]
+    parts_out.append(fea_text[last_end:])
+
+    new_text = "".join(parts_out)
+    new_text = re.sub(r"\n{3,}", "\n\n", new_text)
+    return new_text
+
+
+def _inline_aalt_lookups(fea_text: str) -> str:
+    """Replace ``lookup NAME;`` references inside aalt with the
+    referenced lookup's substitution rules.
+
+    Per Adobe FEA spec, the aalt feature accepts only inline GSUB
+    type 1/3 ``sub`` statements or ``feature TAG;`` includes, not
+    ``lookup`` references. fontFeatures emits lookup references,
+    which fontTools.feaLib accepts but Adobe's addfeatures rejects
+    with::
+
+        ERROR: "lookup" use not allowed in 'aalt' feature
+
+    We extract the ``sub`` statements from each referenced named
+    lookup and inline them into the aalt block. The named lookups
+    remain in place for other features that reference them.
+    """
+    import re
+
+    lookup_re = re.compile(
+        r"^lookup\s+(\w+)\s*\{(.*?)\}\s*\1\s*;",
+        re.DOTALL | re.MULTILINE,
+    )
+    sub_re = re.compile(r"^\s*(sub|ignore\s+sub)\s")
+
+    lookup_subs: dict[str, list[str]] = {}
+    for m in lookup_re.finditer(fea_text):
+        name = m.group(1)
+        body = m.group(2)
+        subs = [
+            line.strip()
+            for line in body.splitlines()
+            if sub_re.match(line)
+        ]
+        if subs:
+            lookup_subs[name] = subs
+
+    aalt_re = re.compile(
+        r"(feature\s+aalt\s*\{)(.*?)(\}\s*aalt\s*;)",
+        re.DOTALL,
+    )
+
+    def _replace(match: re.Match) -> str:
+        prefix = match.group(1)
+        body = match.group(2)
+        suffix = match.group(3)
+        new_lines: list[str] = []
+        for line in body.splitlines():
+            ref = re.match(r"\s*lookup\s+(\w+)\s*;\s*$", line)
+            if ref and ref.group(1) in lookup_subs:
+                for sub in lookup_subs[ref.group(1)]:
+                    new_lines.append(f"    {sub}")
+            else:
+                new_lines.append(line)
+        return prefix + "\n" + "\n".join(new_lines) + "\n" + suffix
+
+    return aalt_re.sub(_replace, fea_text)
+
+
+def _strip_lookup_noise(fea_text: str) -> str:
+    """Remove fontFeatures artifacts inside lookup blocks.
+
+    - 'lookupflag 0;' is the default and adds no information
+    - standalone empty ';' statements are emitted by fontFeatures after
+      the lookupflag line
+    - blank lines immediately before a closing brace are cosmetic noise
+    """
+    import re
+
+    fea_text = re.sub(
+        r"^[ \t]*lookupflag\s+0\s*;[ \t]*\n",
+        "",
+        fea_text,
+        flags=re.MULTILINE,
+    )
+    fea_text = re.sub(r"^[ \t]*;[ \t]*\n", "", fea_text, flags=re.MULTILINE)
+    fea_text = re.sub(r"\n[ \t]*\n([ \t]*\})", r"\n\1", fea_text)
+    return fea_text
+
+
+def _strip_empty_gdef(fea_text: str) -> str:
+    """Remove a fully-empty GDEF table block.
+
+    fontFeatures always emits a GDEF table; when every GlyphClassDef
+    class is empty, the table conveys no information and ufo2ft will
+    regenerate one from UFO glyph classes anyway.
+    """
+    import re
+
+    pattern = re.compile(
+        r"table\s+GDEF\s*\{\s*"
+        r"GlyphClassDef\s*\[\s*\]\s*,\s*\[\s*\]\s*,\s*\[\s*\]\s*,\s*\[\s*\]\s*;\s*"
+        r"\}\s*GDEF\s*;\s*\n?",
+        re.DOTALL,
+    )
+    return pattern.sub("", fea_text)
 
 
 def _validate_font_info(ufo_font, warnings: list[ConversionWarning]) -> None:

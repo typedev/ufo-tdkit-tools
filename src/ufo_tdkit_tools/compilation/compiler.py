@@ -6,7 +6,7 @@ UFO to OTF compilation with PS hint preservation.
 
 Hybrid strategy for preserving PostScript hints during UFO -> OTF compilation:
 1. Compile with ufo2ft (correct metadata, no subroutinization)
-2. Compile with tx + makeotfexe (hints from glyph.lib, no subroutinization)
+2. Compile with tx + makeotf (hints from glyph.lib, no subroutinization)
 3. Per-glyph charstring merge (hinted charstrings into shell CFF)
 4. Transfer PrivateDict hint parameters
 5. Apply cffsubr subroutinization (~38% size reduction, hints in subrs)
@@ -79,15 +79,17 @@ def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
 
 
 def _compile_makeotf_hinted(
-    ufo_path, output_path, makeotf_args, logger=None, tx_path=None, makeotfexe_path=None
+    ufo_path, output_path, makeotf_args, logger=None, tx_path=None, makeotf_path=None
 ):
-    """Compile UFO to OTF using tx + makeotfexe subprocesses.
+    """Compile UFO to OTF using tx + makeotf subprocesses.
 
-    Bypasses the Python makeotf wrapper (getOptions/runMakeOTF) which uses
-    global state and internal subprocess calls that cause race conditions
-    in parallel ProcessPoolExecutor workers.
+    Pipeline: tx -t1 (UFO -> Type1) -> makeotf (Type1 -> OTF)
 
-    Pipeline: tx -t1 (UFO -> Type1) -> makeotfexe (Type1 -> OTF)
+    Uses the ``makeotf`` wrapper (not the deprecated ``makeotfexe`` binary,
+    which is now a stub on AFDKO releases that schedule its removal after
+    March 2027). ``makeotf`` is invoked as a subprocess, not via its Python
+    API, so there is no shared global state and parallel
+    ``ProcessPoolExecutor`` workers stay isolated.
 
     Args:
         ufo_path: Path to UFO source
@@ -95,7 +97,7 @@ def _compile_makeotf_hinted(
         makeotf_args: List of makeotf CLI arguments (ignored -- rebuilt internally)
         logger: Optional logger
         tx_path: Absolute path to tx binary (resolved in main process)
-        makeotfexe_path: Absolute path to makeotfexe binary (resolved in main process)
+        makeotf_path: Absolute path to makeotf binary (resolved in main process)
 
     Returns:
         True on success, False on failure
@@ -110,20 +112,26 @@ def _compile_makeotf_hinted(
     venv_bin = os.path.dirname(sys.executable)
 
     tx_bin = tx_path or shutil.which("tx") or os.path.join(venv_bin, "tx")
-    makeotfexe_bin = (
-        makeotfexe_path
-        or shutil.which("makeotfexe")
-        or os.path.join(venv_bin, "makeotfexe")
+    makeotf_bin = (
+        makeotf_path
+        or shutil.which("makeotf")
+        or os.path.join(venv_bin, "makeotf")
     )
 
-    if not os.path.isfile(tx_bin) or not os.path.isfile(makeotfexe_bin):
+    if not os.path.isfile(tx_bin) or not os.path.isfile(makeotf_bin):
         if logger:
             logger.error(
                 f"Tool resolution failed: tx={tx_bin} (exists={os.path.isfile(tx_bin)}), "
-                f"makeotfexe={makeotfexe_bin} (exists={os.path.isfile(makeotfexe_bin)}), "
+                f"makeotf={makeotf_bin} (exists={os.path.isfile(makeotf_bin)}), "
                 f"venv_bin={venv_bin}, PATH={os.environ.get('PATH', '')[:200]}"
             )
         return False
+
+    # makeotf is a Python wrapper that shells out to tx, addfeatures and spot;
+    # it resolves them via PATH, so ensure the venv bin dir is on PATH.
+    env = dict(os.environ)
+    bin_dir = os.path.dirname(makeotf_bin)
+    env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
 
     # Extract -nS flag from args if present
     extra_flags = []
@@ -131,6 +139,7 @@ def _compile_makeotf_hinted(
         if arg in ("-nS", "-shw"):
             extra_flags.append(arg)
 
+    fea_path = os.path.join(ufo_path, "features.fea")
     t1_path = output_path.replace(".otf", ".ps")
     try:
         # Step 1: Convert UFO to Type 1 using tx
@@ -147,27 +156,42 @@ def _compile_makeotf_hinted(
                     logger.error(f"tx stderr: {tx_result.stderr.strip()}")
             return False
 
-        # Step 2: Compile with makeotfexe
-        cmd = [makeotfexe_bin, "-f", t1_path, "-o", output_path] + extra_flags
-        mko_result = _sp.run(cmd, capture_output=True, text=True, timeout=120)
+        # Step 2: Compile with makeotf wrapper. Pass features.fea explicitly:
+        # the tx-emitted .ps file lives in a temp dir, so makeotf's default
+        # search for a features file adjacent to the input would not find it.
+        cmd = [makeotf_bin, "-f", t1_path, "-o", output_path]
+        if os.path.exists(fea_path):
+            cmd += ["-ff", fea_path]
+        cmd += extra_flags
+        mko_result = _sp.run(cmd, capture_output=True, text=True, timeout=180, env=env)
         if mko_result.returncode != 0:
             if logger:
-                logger.error(f"makeotfexe failed (exit {mko_result.returncode})")
+                logger.error(f"makeotf failed (exit {mko_result.returncode})")
                 if mko_result.stdout.strip():
-                    logger.error(f"makeotfexe stdout: {mko_result.stdout.strip()}")
+                    logger.error(f"makeotf stdout: {mko_result.stdout.strip()}")
                 if mko_result.stderr.strip():
-                    logger.error(f"makeotfexe stderr: {mko_result.stderr.strip()}")
+                    logger.error(f"makeotf stderr: {mko_result.stderr.strip()}")
+            return False
+        # Defensive: makeotf has historically returned 0 even when no output
+        # file was produced (e.g. the makeotfexe stub before its removal).
+        if not os.path.exists(output_path):
+            if logger:
+                logger.error(
+                    "makeotf returned 0 but produced no output file; "
+                    f"stdout: {mko_result.stdout.strip()[:500]}; "
+                    f"stderr: {mko_result.stderr.strip()[:500]}"
+                )
             return False
         if logger and mko_result.stdout.strip():
             for line in mko_result.stdout.strip().split("\n"):
-                logger.info(f"makeotfexe: {line}")
+                logger.info(f"makeotf: {line}")
     except FileNotFoundError as e:
         if logger:
             logger.error(f"Tool not found: {e}")
         return False
     except _sp.TimeoutExpired:
         if logger:
-            logger.error("makeotf compilation timed out (120s)")
+            logger.error("makeotf compilation timed out (180s)")
         return False
     except Exception as e:
         if logger:
@@ -181,7 +205,7 @@ def _compile_makeotf_hinted(
         if os.path.exists(t1_path):
             os.remove(t1_path)
 
-    return os.path.exists(output_path)
+    return True
 
 
 def generate_goadb(ufo_path, glyph_order, output_path, logger=None):
@@ -404,7 +428,7 @@ def prepare_processedglyphs(ufo_path, logger=None):
 
 def compile_otf_preserve(
     ufo_path, otf_path, logger=None, pshash_rebuild=False,
-    tx_path=None, makeotfexe_path=None
+    tx_path=None, makeotf_path=None
 ):
     """Compile OTF preserving PS hints from UFO.
 
@@ -417,7 +441,7 @@ def compile_otf_preserve(
         logger: Optional logger
         pshash_rebuild: If True, rebuild processedglyphs layer before compilation
         tx_path: Absolute path to tx binary (for parallel workers)
-        makeotfexe_path: Absolute path to makeotfexe binary (for parallel workers)
+        makeotf_path: Absolute path to makeotf binary (for parallel workers)
 
     Returns:
         True on success, False on failure
@@ -428,19 +452,19 @@ def compile_otf_preserve(
         logger,
         pshash_rebuild=pshash_rebuild,
         tx_path=tx_path,
-        makeotfexe_path=makeotfexe_path,
+        makeotf_path=makeotf_path,
     )
 
 
 def compile_otf_preserve_optimized(
     ufo_path, otf_path, logger=None, pshash_rebuild=False,
-    tx_path=None, makeotfexe_path=None, stats=None
+    tx_path=None, makeotf_path=None, stats=None
 ):
     """Compile OTF preserving PS hints using per-glyph charstring merge.
 
     Hybrid strategy:
     1. Compile with ufo2ft (optimizeCFF=1) -> shell OTF (correct metadata, no subrs)
-    2. Compile with tx -t1 + makeotfexe -nS -> hinted OTF (hints from glyph.lib)
+    2. Compile with tx -t1 + makeotf -nS -> hinted OTF (hints from glyph.lib)
     3. Copy individual hinted charstrings per-glyph into shell's CFF
     4. Copy PrivateDict hint parameters (BlueValues, StemSnaps, etc.)
     5. Apply cffsubr subroutinization (~38% size reduction, hints preserved in subrs)
@@ -451,7 +475,7 @@ def compile_otf_preserve_optimized(
         logger: Optional logger
         pshash_rebuild: If True, rebuild processedglyphs layer before makeotf
         tx_path: Absolute path to tx binary (for parallel workers)
-        makeotfexe_path: Absolute path to makeotfexe binary (for parallel workers)
+        makeotf_path: Absolute path to makeotf binary (for parallel workers)
         stats: Optional mutable dict, filled with
                {'hints_transferred': int, 'total_glyphs': int}
 
@@ -514,7 +538,7 @@ def compile_otf_preserve_optimized(
         makeotf_args = ["-nS", "-f", ufo_path, "-o", hinted_path]
         if not _compile_makeotf_hinted(
             ufo_path, hinted_path, makeotf_args, logger,
-            tx_path=tx_path, makeotfexe_path=makeotfexe_path,
+            tx_path=tx_path, makeotf_path=makeotf_path,
         ):
             if logger:
                 logger.error("makeotf compilation failed in preserve-optimized mode")

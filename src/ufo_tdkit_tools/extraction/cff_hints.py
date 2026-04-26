@@ -434,4 +434,22 @@ def verify_font_level_hints(
         if cff_val is not None and ufo_val is None:
             setattr(info, ufo_key, cff_val)
 
+    # UFO has no postscriptStdHW/StdVW field, but ufo2ft derives StdHW
+    # from postscriptStemSnapH[0] when compiling. Ensure CFF's StdHW value
+    # is the first entry of StemSnapH so it survives the roundtrip.
+    for cff_std, cff_snap, ufo_snap in [
+        ("StdHW", "StemSnapH", "postscriptStemSnapH"),
+        ("StdVW", "StemSnapV", "postscriptStemSnapV"),
+    ]:
+        std_val = getattr(private, cff_std, None)
+        if std_val is None:
+            continue
+        snap = list(getattr(info, ufo_snap, None) or [])
+        if not snap:
+            snap = list(getattr(private, cff_snap, []) or [])
+        if std_val in snap:
+            snap.remove(std_val)
+        snap.insert(0, std_val)
+        setattr(info, ufo_snap, snap)
+
     return warnings

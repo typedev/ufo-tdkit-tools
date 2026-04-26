@@ -96,7 +96,7 @@ def preserve_compile(
     otf_path: str,
     logger: Optional[logging.Logger] = None,
     tx_path: Optional[str] = None,
-    makeotfexe_path: Optional[str] = None,
+    makeotf_path: Optional[str] = None,
 ) -> PreserveCompileResult:
     """Compile a single UFO to OTF preserving PS hints.
 
@@ -108,7 +108,7 @@ def preserve_compile(
         otf_path: Path for output OTF file.
         logger: Optional logger instance.
         tx_path: Path to AFDKO tx binary (auto-detected if None).
-        makeotfexe_path: Path to AFDKO makeotfexe binary (auto-detected if None).
+        makeotf_path: Path to AFDKO makeotf wrapper (auto-detected if None).
 
     Returns:
         PreserveCompileResult with compilation details.
@@ -132,10 +132,10 @@ def preserve_compile(
 
     # Resolve tool paths
     _tx = tx_path or shutil.which("tx")
-    _mko = makeotfexe_path or shutil.which("makeotfexe")
+    _mko = makeotf_path or shutil.which("makeotf")
 
     if not _tx or not _mko:
-        result.error = f"AFDKO tools not found (tx: {_tx}, makeotfexe: {_mko})"
+        result.error = f"AFDKO tools not found (tx: {_tx}, makeotf: {_mko})"
         return result
 
     # Ensure output directory exists
@@ -148,7 +148,7 @@ def preserve_compile(
         otf_path,
         logger=logger,
         tx_path=_tx,
-        makeotfexe_path=_mko,
+        makeotf_path=_mko,
         stats=compile_stats,
     )
 
@@ -164,11 +164,11 @@ def preserve_compile(
 
 def _worker_compile(args: tuple) -> PreserveCompileResult:
     """Worker function for parallel batch compilation."""
-    ufo_path, otf_path, tx_path, makeotfexe_path = args
+    ufo_path, otf_path, tx_path, makeotf_path = args
     logger = logging.getLogger(f"ufo_tdkit_tools.preserve.{os.path.basename(ufo_path)}")
     return preserve_compile(
         ufo_path, otf_path, logger=logger,
-        tx_path=tx_path, makeotfexe_path=makeotfexe_path,
+        tx_path=tx_path, makeotf_path=makeotf_path,
     )
 
 
@@ -204,14 +204,14 @@ def preserve_compile_batch(
 
     # Pre-resolve tool paths
     tx_path = shutil.which("tx")
-    makeotfexe_path = shutil.which("makeotfexe")
+    makeotf_path = shutil.which("makeotf")
 
     # Build task list
     tasks = []
     for ufo_path in ufo_list:
         ufo_name = os.path.basename(ufo_path).replace(".ufo", "")
         otf_path = os.path.join(output_dir, f"{ufo_name}.otf")
-        tasks.append((ufo_path, otf_path, tx_path, makeotfexe_path))
+        tasks.append((ufo_path, otf_path, tx_path, makeotf_path))
 
     batch = BatchCompileResult()
 
@@ -239,7 +239,7 @@ def preserve_compile_batch(
             ufo_path, otf_path, _tx, _mko = task
             result = preserve_compile(
                 ufo_path, otf_path, logger=logger,
-                tx_path=_tx, makeotfexe_path=_mko,
+                tx_path=_tx, makeotf_path=_mko,
             )
             batch.results.append(result)
             if on_progress:

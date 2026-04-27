@@ -35,12 +35,15 @@ extraction = [
     "fontParts>=0.10.0",
     "defcon",
     "ufo-extractor>=0.8.1",
+    "afdko>=5.0.0",
+    "typing-extensions>=4.15.0",
 ]
 compilation = [
     "ufo2ft>=3.0.0",
     "cffsubr",
     "defcon",
     "fontParts>=0.10.0",
+    "afdko>=5.0.0",
 ]
 all = [
     "ufo-tdkit-tools[extraction,compilation]",

@@ -7,6 +7,40 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "afdko"
+version = "5.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "booleanoperations" },
+    { name = "defcon", extra = ["lxml", "pens"] },
+    { name = "fontmath" },
+    { name = "fonttools", extra = ["lxml", "unicode", "woff"] },
+    { name = "lxml" },
+    { name = "tqdm" },
+    { name = "ufonormalizer" },
+    { name = "ufoprocessor" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0f/50/7324d3a4367e178dd9b47fe87087c0306cd5ca10d08465fb07de3e1a5f50/afdko-5.0.0.tar.gz", hash = "sha256:7dc5f7af9d7167cac00019b7c585c8169e5c32b5c092649eb03cf8d12e04c197", size = 17353113, upload-time = "2026-03-23T06:56:10.035Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c9/9d/4bbe15f2abce6ba94f369bdf9f58b69c09321228c2e62d510681c9e197a4/afdko-5.0.0-cp310-cp310-macosx_10_15_universal2.whl", hash = "sha256:af2e9c5f405f4969c0c74a4c12041359e526b749590982b13836f07ae64190a3", size = 4765600, upload-time = "2026-03-23T06:55:41.686Z" },
+    { url = "https://files.pythonhosted.org/packages/df/c5/a788863bddb038c9c4ec0b39e0884e60625f0a1ba60ea45904ecb37f707f/afdko-5.0.0-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:afc468adda958117d622a710755a89123b4f7b8ace3c013a37178b7ee5794e9b", size = 2869789, upload-time = "2026-03-23T06:55:43.503Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/67/31eec780e236baa3eb769d00010851284b07656176139df8802d0741a59a/afdko-5.0.0-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:d46665a4f3427aaab291e8a94344dd231f7dd709af5f92f7dbc80969f13dd050", size = 3443062, upload-time = "2026-03-23T06:55:45.204Z" },
+    { url = "https://files.pythonhosted.org/packages/14/c4/0948dbcea651abfebd8569b38428535a1d6a086ce4d535e681585b128b0c/afdko-5.0.0-cp310-cp310-win_amd64.whl", hash = "sha256:87c4145744a7415d122ae7cda50e2645b8ef3cdac3a461ebd028b28f73669c28", size = 2722586, upload-time = "2026-03-23T06:55:46.838Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/3c/c08fa8643d0cd65a898c8c76c659be4841576873c3627c0cacdfbffb8b09/afdko-5.0.0-cp311-cp311-macosx_10_15_universal2.whl", hash = "sha256:58fce1c087819049e061c2533daea407c2b07a6700c4d635f90049bac99aa45b", size = 4765784, upload-time = "2026-03-23T06:55:48.784Z" },
+    { url = "https://files.pythonhosted.org/packages/10/a1/73d60b7453c62d70774f9260e4359b2d9c575b4a35d2c46a7781400be7ca/afdko-5.0.0-cp311-cp311-macosx_10_15_x86_64.whl", hash = "sha256:0495a41fde926e9de3bab1c9c54dd7aa2e3c99c4650dab39692bd7b87eea1389", size = 2869916, upload-time = "2026-03-23T06:55:50.561Z" },
+    { url = "https://files.pythonhosted.org/packages/28/de/2071c69636a4fa694329a4d44a6135a15e1606928d03ddfd1077fd9fbcdb/afdko-5.0.0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:9ba654eda6eb32bbb76f3d8c68d6437cbe25f16449bb37f7e7f98cc1f48be620", size = 3443363, upload-time = "2026-03-23T06:55:52.271Z" },
+    { url = "https://files.pythonhosted.org/packages/05/d5/5068c4cd2e555cde59ca1f6ca4e90acdbdf9e525d3edeee2e2e9a0a20e99/afdko-5.0.0-cp311-cp311-win_amd64.whl", hash = "sha256:9d7976eb1df039c5d09699f861d0648d96159ac2c0285594a572611d56c171c5", size = 2722715, upload-time = "2026-03-23T06:55:53.664Z" },
+    { url = "https://files.pythonhosted.org/packages/67/71/fce822a3b93014c60a75df36daa7211a57259d994d6af5c31a22d847ec8a/afdko-5.0.0-cp312-cp312-macosx_10_15_universal2.whl", hash = "sha256:7d00191a42e0fd528a191966460d61a55325d8b65f72cbbdf1e9cf9f2b50bd8e", size = 4766087, upload-time = "2026-03-23T06:55:55.217Z" },
+    { url = "https://files.pythonhosted.org/packages/22/7b/973f5dcae760e3e801c8743ecffa333fa442c339913962413a3febe80843/afdko-5.0.0-cp312-cp312-macosx_10_15_x86_64.whl", hash = "sha256:02285bd2c4fcd322a1236018ed9c126d5ed59a8a84ab2c37db872ee7ed881783", size = 2870537, upload-time = "2026-03-23T06:55:56.593Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/0f/7a40c4b16f3c97731e5ed154f187ef2d40ca971ab38ba7a103f1f2fe5e94/afdko-5.0.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:58a0b68d859d4f949cd8baee4cf51219b58c0665e5fb00020c156b0790a12194", size = 3443514, upload-time = "2026-03-23T06:55:58.712Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/d0/73ff2ccc4c94f1896ba250b18eae98deeae250a7c6a3e27120f698f45dda/afdko-5.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:254bdb79c2aeaa314140926c94c4e1c67a67f1770cb5c2a12969a4db66827ceb", size = 2721976, upload-time = "2026-03-23T06:56:00.397Z" },
+    { url = "https://files.pythonhosted.org/packages/17/c1/c114d8af7aab9f0b6f809fbbdb8e2972f5012a69999b1834afcfea008f71/afdko-5.0.0-cp313-cp313-macosx_10_15_universal2.whl", hash = "sha256:bc5d9dc4445492738f254855458c525f0cda9984923f235c1b48a91ed12f661f", size = 4765896, upload-time = "2026-03-23T06:56:01.902Z" },
+    { url = "https://files.pythonhosted.org/packages/96/27/b6bb4725612c283f59deb80a1df7a61906c87dec61bc14ff1decdbe49b69/afdko-5.0.0-cp313-cp313-macosx_10_15_x86_64.whl", hash = "sha256:1c2432ab05416f41df4b56b6cb1ced302c3fce47ea83658ece1ad4b7cf3fe892", size = 2870190, upload-time = "2026-03-23T06:56:03.886Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/e4/f914e392622043e6f0157bb9686a7e342bde01227fef65d92035ccb90e0e/afdko-5.0.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:2f56d4467b3cefe163030ba8a3acd2daabc0f61bdebf4c370a863b41f10d88dc", size = 3442674, upload-time = "2026-03-23T06:56:05.747Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/64/31ccb3463de2c69408d085dee07a48435bc8b3ad1acffe72a13eb07f76f8/afdko-5.0.0-cp313-cp313-win_amd64.whl", hash = "sha256:3c1f9ea7a46f122cd2b1dfb6a381fb93052d182692204edc9e86cbd488fe3db0", size = 2721328, upload-time = "2026-03-23T06:56:07.747Z" },
+]
+
+[[package]]
 name = "booleanoperations"
 version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -222,6 +256,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+lxml = [
+    { name = "fonttools", extra = ["lxml"] },
+]
 pens = [
     { name = "fontpens" },
 ]
@@ -497,6 +534,20 @@ wheels = [
 ]
 
 [[package]]
+name = "mutatormath"
+version = "3.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "defcon" },
+    { name = "fontmath" },
+    { name = "fonttools" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/44/02/d1ddbbc5698db8ad2a0d1f8a23d52305e66166b6fea5ada5e146dd3a709a/MutatorMath-3.0.1.zip", hash = "sha256:8127c1ffad1646f11a953752296c43f5d88cbd5293fff03f093d916b0bc13864", size = 421722, upload-time = "2020-04-24T09:23:32.876Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/02/61/e3e6190a8d94c6a99d9605c721e1e38ebae19dc194059477affa57f6e111/MutatorMath-3.0.1-py2.py3-none-any.whl", hash = "sha256:949dc3c1ea71c3b8a88cdeec6b3224b039d9da3888af133eb7e09ce1d5b19821", size = 31986, upload-time = "2020-04-24T09:23:31.333Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -673,6 +724,18 @@ wheels = [
 ]
 
 [[package]]
+name = "tqdm"
+version = "4.67.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/e1/3079a9ff9b8e11b846c6ac5c8b5bfb7ff225eee721825310c91b3b50304f/tqdm-4.67.3-py3-none-any.whl", hash = "sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf", size = 78374, upload-time = "2026-02-03T17:35:50.982Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -704,13 +767,16 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
+    { name = "afdko" },
     { name = "cffsubr" },
     { name = "defcon" },
     { name = "fontparts" },
+    { name = "typing-extensions" },
     { name = "ufo-extractor" },
     { name = "ufo2ft" },
 ]
 compilation = [
+    { name = "afdko" },
     { name = "cffsubr" },
     { name = "defcon" },
     { name = "fontparts" },
@@ -721,13 +787,17 @@ dev = [
     { name = "ruff" },
 ]
 extraction = [
+    { name = "afdko" },
     { name = "defcon" },
     { name = "fontparts" },
+    { name = "typing-extensions" },
     { name = "ufo-extractor" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "afdko", marker = "extra == 'compilation'", specifier = ">=5.0.0" },
+    { name = "afdko", marker = "extra == 'extraction'", specifier = ">=5.0.0" },
     { name = "cffsubr", marker = "extra == 'compilation'" },
     { name = "defcon", marker = "extra == 'compilation'" },
     { name = "defcon", marker = "extra == 'extraction'" },
@@ -736,6 +806,7 @@ requires-dist = [
     { name = "fonttools", specifier = ">=4.38.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1" },
+    { name = "typing-extensions", marker = "extra == 'extraction'", specifier = ">=4.15.0" },
     { name = "ufo-extractor", marker = "extra == 'extraction'", specifier = ">=0.8.1" },
     { name = "ufo-tdkit-tools", extras = ["extraction", "compilation"], marker = "extra == 'all'" },
     { name = "ufo2ft", marker = "extra == 'compilation'", specifier = ">=3.0.0" },
@@ -755,6 +826,31 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e0/31/afc6225571a323ef7dc1fea2fd92e1a0c1ca2c02ff36d2f9dd5e659bb281/ufo2ft-3.7.1.tar.gz", hash = "sha256:3100f3058e01117560e99bdb064ce9dd636f17c28dfab02d2bfe31e05469ae3a", size = 445019, upload-time = "2026-03-18T11:37:59.01Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/31/6f063f4a8aa9229f0e61e5cb37fde9200ae3b41266c72178c156e0d6f7a6/ufo2ft-3.7.1-py3-none-any.whl", hash = "sha256:daba1feec7a52ca9a9443cb5dae25a9e64a8d014390f19a8e4be406a7324689e", size = 165058, upload-time = "2026-03-18T11:37:57.258Z" },
+]
+
+[[package]]
+name = "ufonormalizer"
+version = "0.6.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f2/67/557823860d2bc7a340ce4772261e35c969e2243621ec32fae62801a4ba6a/ufonormalizer-0.6.3.tar.gz", hash = "sha256:c3271097aba9d290594b75c2b432cf681088b74fe3eb334ca4319324e2bddd4e", size = 33324, upload-time = "2025-09-23T19:57:06.05Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e9/5b/b6751a54387344cb7cef779a231df68dea77b7adbbab924f5e4f2056cedb/ufonormalizer-0.6.3-py3-none-any.whl", hash = "sha256:09015963e0fec72ca96f2128bcace869990dead40e8f4872a02a014d2a2f024f", size = 18320, upload-time = "2025-09-23T19:57:04.621Z" },
+]
+
+[[package]]
+name = "ufoprocessor"
+version = "1.14.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "defcon", extra = ["lxml"] },
+    { name = "fontmath" },
+    { name = "fontparts" },
+    { name = "fonttools", extra = ["lxml"] },
+    { name = "mutatormath" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/73/86/7564e3b6ff396372c4eb444181c5446f19a8bfa83cdb9f8ee1c8f1fa0de0/ufoprocessor-1.14.1.tar.gz", hash = "sha256:fd38d3cc359b94171ba8d3fdc1e4defde2206acef4f97d75b48503bb8ac03b01", size = 122945, upload-time = "2025-10-31T16:23:40.695Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/15/60f9933bcaa1c525d130fd4675053ab471274822913f9c57a324c519f3ae/ufoprocessor-1.14.1-py2.py3-none-any.whl", hash = "sha256:bfb5521dae1d25181d0514d786d5a515d1f17bb3f097e253c9c53b3187cb21f7", size = 38004, upload-time = "2025-10-31T16:23:39.355Z" },
 ]
 
 [[package]]

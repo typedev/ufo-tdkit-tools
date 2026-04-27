@@ -19,7 +19,7 @@ uv build                                         # Build wheel
 
 ## Architecture
 
-Three main workflows, each in its own subpackage under `src/ufo_tdkit_tools/`:
+Three main workflows, each in its own subpackage under `src/ufo_tdkit_tools/`, plus a top-level `pipeline.py` that ties them together:
 
 1. **`extraction/`** — Binary font (OTF/TTF/WOFF/WOFF2) → in-memory UFO. Uses `ufo-extractor` for bulk work plus custom CFF hint extraction from PostScript charstrings. Optional dependency group `[extraction]`.
    - `converter.py`: Top-level pipeline (`convert_binary_to_ufo`) and FEA post-processing — `_unify_feature_blocks` (one block per tag with internal script/language scoping), `_inline_aalt_lookups` (Adobe FEA spec compliance — `aalt` rejects `lookup` references), `_strip_lookup_noise`, `_strip_empty_gdef`. Drops the auto-generated `kern` feature.
@@ -27,12 +27,15 @@ Three main workflows, each in its own subpackage under `src/ufo_tdkit_tools/`:
 
 2. **`ps_hints/`** — Hint parsing, optimization, analysis, validation, and layer conversion. Always available (core dep: fontTools only).
    - `parser.py`: Data models (`PSHint`, `PSHintSet`, `PSHintData`, `HintSource` enum) and parsing from UFO glyph lib entries.
-   - `optimizer.py`: 5-step pipeline — remove too-wide vstems → build coverage map (ray-casting, even-odd fill) → filter small-element stems → extract vstem3 triples → resolve overlaps. See `OPTIMIZER_ALGORITHM.md` for details.
+   - `optimizer.py`: 5-step pipeline — remove too-wide vstems → build coverage map (ray-casting, even-odd fill) → filter small-element stems → extract vstem3 triples → resolve overlaps. See `OPTIMIZER_ALGORITHM.md` for details. Reads from and writes to processedglyphs layer only.
    - `analyzer.py`: Same logic as optimizer but non-destructive; returns issue list.
-   - `converter.py`: Move hints between the processedglyphs layer, glyph lib, and default layer.
+   - `converter.py`: Per-glyph helpers to move hints between the three sources (`processedglyphs` layer, default-layer `autohint.v2`, default-layer `public.postscript.hints`).
+   - `batch.py`: Whole-font wrappers around `converter.py` and `optimizer.py` — `detect_font_source` (whole-font priority), `import_all_to_processed`, `export_all_from_processed`, `remove_all_hints`, `optimize_font` (vacuums stem snaps and UPM from `font.info`).
    - `validator.py`: Validate hints across an entire UFO.
 
-3. **`compilation/`** — UFO → OTF with hint preservation. Hybrid pipeline: ufo2ft creates an unhinted OTF shell with correct metadata; `tx -t1` + `makeotf` (the wrapper, not the deprecated `makeotfexe` stub) builds a hinted OTF from the UFO; per-glyph charstrings and the Private dict hint params are merged into the shell; `cffsubr` subroutinizes the result. Optional dependency group `[compilation]`. Supports batch processing via `ProcessPoolExecutor` (each worker spawns its own `makeotf` subprocess — no shared state).
+3. **`compilation/`** — UFO → OTF with hint preservation. Hybrid pipeline: ufo2ft creates an unhinted OTF shell with correct metadata; `tx -t1` + `makeotf` (the wrapper, not the deprecated `makeotfexe` stub) builds a hinted OTF from the UFO; per-glyph charstrings and the Private dict hint params are merged into the shell; `cffsubr` subroutinizes the result. Optional dependency group `[compilation]`. Supports batch processing via `ProcessPoolExecutor` (each worker spawns its own `makeotf` subprocess — no shared state). Reads hints from default-layer `autohint.v2` only — does not create or read processedglyphs (see comment in `compiler.py:529-533`).
+
+4. **`pipeline.py`** — Single public entry point (`process_font`). Takes any binary or UFO input and produces an OTF + UFO pair. Resolves hint source per `hint_source` arg (auto-detect or explicit), optionally runs the optimizer, normalizes hints into default `autohint.v2`, then compiles. Layer hygiene rule: a processedglyphs layer present on input survives to output; one created by the pipeline as a working buffer is removed before save. Returns `ProcessResult` dataclass.
 
 **`constants.py`** — Shared lib keys (`com.adobe.type.autohint.v2`, `public.postscript.hints`, etc.), processed layer names, validation constants, and `compute_outline_hash()` (must match AFDKO's HashPointPen algorithm).
 
@@ -47,10 +50,50 @@ The OTF → UFO → OTF round-trip preserves:
 
 Known limitation: hint substitutions that fire **between subpaths** (a `hintmask` immediately before a `moveto`, common on disconnected glyphs like `i`, `j`, dieresis-bearing letters) are not representable in the `autohint.v2` format and degrade to a single hint set. AFDKO's own autohint output exhibits the same limitation.
 
+## Inspecting hints in compiled OTFs
+
+`compilation/compiler.py` always runs `cffsubr.subroutinize` as the final step. After subroutinization most glyphs reduce to a `callsubr` / `callgsubr` wrapper, and the actual hint operators (`hstem`, `vstem`, `hstemhm`, `vstemhm`, `hintmask`, `cntrmask`) live **inside the called subroutine, not at the top level of the charstring**.
+
+Any code that audits hint presence by scanning `charstring.program` will undercount and report false "hint loss" unless it desubroutinizes first. Use this:
+
+```python
+from fontTools.ttLib import TTFont
+from fontTools import subset
+
+HINT_OPS = {"hstem", "vstem", "hstemhm", "vstemhm", "hintmask", "cntrmask"}
+
+def count_hinted_glyphs(otf_path: str) -> tuple[int, int]:
+    f = TTFont(otf_path)
+    options = subset.Options()
+    options.desubroutinize = True
+    options.notdef_outline = True
+    options.glyph_names = True
+    options.layout_features = ["*"]
+    options.name_IDs = ["*"]
+    options.name_languages = ["*"]
+    options.notdef_glyph = True
+    sub = subset.Subsetter(options=options)
+    sub.populate(glyphs=f.getGlyphOrder())
+    sub.subset(f)
+    cs = f["CFF "].cff.topDictIndex[0].CharStrings
+    hinted = 0
+    for n in cs.keys():
+        cs[n].decompile()
+        if any(isinstance(op, str) and op in HINT_OPS for op in cs[n].program):
+            hinted += 1
+    f.close()
+    return hinted, len(cs.keys())
+```
+
+The same caveat applies to byte-level diffs of individual charstrings: `cs.program` for a subroutinized glyph may look like `[N, M, 'callsubr']` even when the underlying glyph carries a full set of stems and hint substitutions.
+
 ## Key Design Patterns
 
-- **Lazy imports** via `__getattr__` in `__init__.py` for optional modules (extraction, compilation)
-- **Hint source priority**: PROCESSED_LAYER > AUTOHINT_V2 > PUBLIC_PS — the processedglyphs layer is the canonical hint storage
+- **Lazy imports** via `__getattr__` in `__init__.py` for optional modules (extraction, compilation, pipeline)
+- **Hint source priority**: PROCESSED_LAYER > AUTOHINT_V2 > PUBLIC_PS — used by `pipeline.process_font(hint_source="auto")` and `ps_hints.batch.detect_font_source`
+- **Single source per font** — `process_font` picks one hint source for the whole font; per-glyph mixed sources are not supported (the lower-priority sources are ignored)
+- **Optimizer works only in processedglyphs** — by design; `pipeline.py` imports the chosen source into processedglyphs as a working layer, then exports back to default `autohint.v2`
+- **Compiler reads only default-layer `autohint.v2`** — pipeline always normalizes here before compile
 - **Dataclasses** for all data structures and result objects
 - **Stateless functions** for compilation — enables safe parallel processing
 - **AFDKO Python API over subprocess** where possible — extraction calls `afdko.otfautohint` Python functions in-process; compilation still subprocesses `tx` and `makeotf` because they're external binaries

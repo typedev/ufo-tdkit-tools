@@ -65,6 +65,41 @@ class TestDecodeActiveStems:
         assert _decode_active_stems(None, [], []) == []
         assert _decode_active_stems([[], []], [], []) == []
 
+    def test_cntrmask_emits_vstem3_when_v_orientation_grouped(self):
+        # 'm'-like: 3 hstems untouched, 3 vstems collapsed into vstem3.
+        hstems = [_FakeStem(21, -21), _FakeStem(434, 74), _FakeStem(500, -20)]
+        vstems = [_FakeStem(65, 80), _FakeStem(361, 80), _FakeStem(657, 80)]
+        # cntrmask: 0 hstems, all 3 vstems grouped
+        cntr = [[[False, False, False], [True, True, True]]]
+        out = _decode_active_stems(None, hstems, vstems, cntr)
+        assert "vstem3 65 80 361 80 657 80" in out
+        # h-stems remain individual
+        assert "hstem 21 -21" in out
+        # No bare vstem entries
+        assert not any(s.startswith("vstem ") for s in out)
+
+    def test_cntrmask_only_emits_active_stems_in_triplet(self):
+        hstems = []
+        vstems = [_FakeStem(0, 80), _FakeStem(100, 80), _FakeStem(200, 80)]
+        cntr = [[[], [True, True, True]]]
+        # hint mask says only first and third v-stem active
+        masks = [[], [True, False, True]]
+        out = _decode_active_stems(masks, hstems, vstems, cntr)
+        # Triplet contains only the masked-active stems
+        assert out == ["vstem3 0 80 200 80"]
+
+    def test_no_cntrmask_emits_individual_stems(self):
+        hstems = [_FakeStem(0, 78)]
+        vstems = [_FakeStem(10, 50)]
+        out = _decode_active_stems(None, hstems, vstems, cntr=None)
+        assert out == ["hstem 0 78", "vstem 10 50"]
+
+    def test_empty_cntr_treated_as_no_cntrmask(self):
+        hstems = [_FakeStem(0, 78)]
+        vstems = [_FakeStem(10, 50)]
+        out = _decode_active_stems(None, hstems, vstems, cntr=[])
+        assert out == ["hstem 0 78", "vstem 10 50"]
+
 
 class TestSegmentAnchorIndex:
     def test_line_segment_endpoint(self):
@@ -124,6 +159,7 @@ class TestBuildHintSetListIntegration:
             vstems=[],
             startmasks=None,
             subpaths=[],
+            cntr=[],
         )
         ufo_glyph = []
         assert _build_hint_set_list(gd, ufo_glyph) == []
@@ -136,6 +172,7 @@ class TestBuildHintSetListIntegration:
             vstems=[_FakeStem(10, 50)],
             startmasks=None,
             subpaths=[[]],  # one empty subpath, just to satisfy iteration
+            cntr=[],
         )
         contour = _FakeContour([_FakePoint(0, 0, "line")])
         ufo_glyph = [contour]

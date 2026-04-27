@@ -42,36 +42,82 @@ def _format_stem(stem_type: str, pos: float, width: float) -> str:
 # ── Hint set construction ────────────────────────────────────────────────────
 
 
-def _decode_active_stems(masks, hstems, vstems) -> list[str]:
+def _format_stem3(stem_type: str, stems_with_pos_width) -> str:
+    """Format a counter-triplet entry: ``vstem3 p1 w1 p2 w2 …``.
+
+    AFDKO's `addUfoMask` flattens all selected stems of one orientation
+    into a single space-separated string when the glyph has a cntrmask
+    affecting that orientation; this matches that encoding.
+    """
+
+    def _fmt(v: float) -> str:
+        if v == int(v):
+            return str(int(v))
+        return f"{v:g}"
+
+    parts = [stem_type]
+    for pos, width in stems_with_pos_width:
+        parts.append(_fmt(pos))
+        parts.append(_fmt(width))
+    return " ".join(parts)
+
+
+def _is_counter_orientation(cntr) -> tuple[bool, bool]:
+    """Decide whether each orientation should be encoded as a triplet.
+
+    Mirrors AFDKO `addUfoMask`: when the FIRST cntrmask entry has any
+    True bit in an orientation, the whole orientation switches to
+    `hstem3`/`vstem3` encoding. ``cntr`` is the AFDKO ``glyph.cntr``
+    list; absent or empty -> (False, False).
+    """
+    if not cntr:
+        return False, False
+    first = cntr[0]
+    if not first or len(first) < 2:
+        return False, False
+    h_mask, v_mask = first[0], first[1]
+    h_cntr = bool(h_mask) and any(h_mask)
+    v_cntr = bool(v_mask) and any(v_mask)
+    return h_cntr, v_cntr
+
+
+def _decode_active_stems(masks, hstems, vstems, cntr=None) -> list[str]:
     """Convert AFDKO boolean mask pair into UFO hint-string list.
 
-    ``masks`` is ``[hhints, vhints]`` where each is a list of bools the same
-    length as the corresponding stem list. Returns formatted ``hstem`` /
-    ``vstem`` strings for stems whose bool is True.
+    ``masks`` is ``[hhints, vhints]`` where each is a list of bools the
+    same length as the corresponding stem list. Stems whose bool is True
+    are emitted as ``hstem``/``vstem`` strings.
+
+    When ``cntr`` (gd.cntr from convertT2ToGlyphData) marks an
+    orientation as counter-controlled, all stems of that orientation are
+    flattened into a single ``hstem3``/``vstem3`` triplet entry,
+    matching AFDKO's `addUfoMask`.
     """
     out: list[str] = []
     h_mask = masks[0] if masks and len(masks) > 0 else None
     v_mask = masks[1] if masks and len(masks) > 1 else None
+    h_cntr, v_cntr = _is_counter_orientation(cntr)
 
-    if h_mask is None:
-        for stem in hstems:
-            p, w = stem.UFOVals()
+    h_pairs = []
+    for i, stem in enumerate(hstems):
+        if h_mask is None or (i < len(h_mask) and h_mask[i]):
+            h_pairs.append(stem.UFOVals())
+    if h_cntr and h_pairs:
+        out.append(_format_stem3("hstem3", h_pairs))
+    else:
+        for p, w in h_pairs:
             out.append(_format_stem("hstem", p, w))
-    else:
-        for stem, on in zip(hstems, h_mask):
-            if on:
-                p, w = stem.UFOVals()
-                out.append(_format_stem("hstem", p, w))
 
-    if v_mask is None:
-        for stem in vstems:
-            p, w = stem.UFOVals()
-            out.append(_format_stem("vstem", p, w))
+    v_pairs = []
+    for i, stem in enumerate(vstems):
+        if v_mask is None or (i < len(v_mask) and v_mask[i]):
+            v_pairs.append(stem.UFOVals())
+    if v_cntr and v_pairs:
+        out.append(_format_stem3("vstem3", v_pairs))
     else:
-        for stem, on in zip(vstems, v_mask):
-            if on:
-                p, w = stem.UFOVals()
-                out.append(_format_stem("vstem", p, w))
+        for p, w in v_pairs:
+            out.append(_format_stem("vstem", p, w))
+
     return out
 
 
@@ -147,7 +193,7 @@ def _build_hint_set_list(gd, ufo_glyph) -> list[dict[str, Any]]:
         hint_set_list.append({
             "pointTag": wrap_pt.name,
             "stems": _decode_active_stems(
-                gd.startmasks, gd.hstems, gd.vstems
+                gd.startmasks, gd.hstems, gd.vstems, gd.cntr
             ),
         })
 
@@ -170,7 +216,9 @@ def _build_hint_set_list(gd, ufo_glyph) -> list[dict[str, Any]]:
                 used_names.add(pt.name)
             hint_set_list.append({
                 "pointTag": pt.name,
-                "stems": _decode_active_stems(pe.masks, gd.hstems, gd.vstems),
+                "stems": _decode_active_stems(
+                    pe.masks, gd.hstems, gd.vstems, gd.cntr
+                ),
             })
 
     return hint_set_list

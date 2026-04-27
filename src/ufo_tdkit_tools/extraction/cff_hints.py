@@ -16,162 +16,14 @@ hint storage spec until now.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from fontTools.misc.psCharStrings import SimpleT2Decompiler
 from fontTools.ttLib import TTFont
 
 from ufo_tdkit_tools.constants import ADOBE_HINT_KEY_V2, compute_outline_hash
 from ufo_tdkit_tools.extraction.warnings import ConversionWarning, WarningSeverity
 
 logger = logging.getLogger(__name__)
-
-# Coordinate matching tolerance (font units)
-_COORD_TOLERANCE = 0.5
-
-
-# ── Data structures ──────────────────────────────────────────────────────────
-
-
-@dataclass
-class HintMaskInfo:
-    """Records a hintmask/cntrmask encountered during charstring execution."""
-
-    mask_bytes: bytes
-    position: tuple[float, float]  # (x, y) at the point where mask was applied
-    num_hstems: int
-    num_vstems: int
-
-
-@dataclass
-class GlyphHintResult:
-    """Extracted hint data for a single glyph."""
-
-    hstems: list[tuple[float, float]] = field(default_factory=list)  # (pos, width)
-    vstems: list[tuple[float, float]] = field(default_factory=list)
-    hint_masks: list[HintMaskInfo] = field(default_factory=list)
-    drawing_points: list[tuple[float, float]] = field(default_factory=list)
-    has_hints: bool = False
-
-
-# ── T2 Charstring decompiler with hint extraction ────────────────────────────
-
-
-class HintExtractingDecompiler(SimpleT2Decompiler):
-    """T2 CharString decompiler that intercepts hint operators.
-
-    Collects horizontal and vertical stem hints with proper handling of:
-    - Cumulative delta encoding (position accumulates across stem pairs)
-    - Optional width value (first stack-clearing op may have odd arg count)
-    - Implicit vstems before hintmask/cntrmask
-    """
-
-    def __init__(self, localSubrs, globalSubrs):
-        super().__init__(localSubrs, globalSubrs)
-        self.hstems: list[tuple[float, float]] = []
-        self.vstems: list[tuple[float, float]] = []
-        self._width_seen = False  # Track if optional width was consumed
-        # Cumulative position tracking across multiple operator calls
-        self._h_pos = 0.0
-        self._v_pos = 0.0
-
-    def _pop_and_strip_width(self) -> list:
-        """Pop all args, stripping optional width value from first operator.
-
-        In T2 charstrings, the first stack-clearing operator may have an
-        extra arg (odd count) which is the glyph width, not a hint value.
-        """
-        args = self.popall()
-        if not self._width_seen:
-            self._width_seen = True
-            if len(args) % 2 == 1:
-                args = args[1:]  # Strip width value
-        return args
-
-    def _collect_stems(self, args: list, target: list, vertical: bool) -> None:
-        """Decode cumulative stem encoding from CFF charstring.
-
-        CFF stems use cumulative deltas within and across operator calls:
-        hstem -10 70 -39 -21  ->  stem at -10 (w=70), then at 21 (w=-21 ghost)
-        """
-        pos = self._v_pos if vertical else self._h_pos
-        for i in range(0, len(args) - 1, 2):
-            delta = args[i]
-            width = args[i + 1]
-            pos += delta
-            target.append((pos, width))
-            pos += width
-        if vertical:
-            self._v_pos = pos
-        else:
-            self._h_pos = pos
-
-    def op_hstem(self, index):
-        args = self._pop_and_strip_width()
-        self.hintCount += len(args) // 2
-        self._collect_stems(args, self.hstems, vertical=False)
-
-    def op_vstem(self, index):
-        args = self._pop_and_strip_width()
-        self.hintCount += len(args) // 2
-        self._collect_stems(args, self.vstems, vertical=True)
-
-    def op_hstemhm(self, index):
-        args = self._pop_and_strip_width()
-        self.hintCount += len(args) // 2
-        self._collect_stems(args, self.hstems, vertical=False)
-
-    def op_vstemhm(self, index):
-        args = self._pop_and_strip_width()
-        self.hintCount += len(args) // 2
-        self._collect_stems(args, self.vstems, vertical=True)
-
-    def op_hintmask(self, index):
-        # Any remaining stack args are implicit vstems
-        if self.operandStack:
-            args = self._pop_and_strip_width()
-            self.hintCount += len(args) // 2
-            self._collect_stems(args, self.vstems, vertical=True)
-        # Let parent handle the mask bytes (reads mask bytes, advances index)
-        return super().op_hintmask(index)
-
-    def op_cntrmask(self, index):
-        if self.operandStack:
-            args = self._pop_and_strip_width()
-            self.hintCount += len(args) // 2
-            self._collect_stems(args, self.vstems, vertical=True)
-        return super().op_cntrmask(index)
-
-
-def _execute_charstring(charstring, local_subrs, global_subrs) -> GlyphHintResult:
-    """Execute a T2 charstring and extract hint data.
-
-    Uses HintExtractingDecompiler (subclass of SimpleT2Decompiler) to
-    follow subroutine calls and collect all stem hints.
-
-    Args:
-        charstring: Decompiled T2CharString.
-        local_subrs: Local subroutines from CFF Private dict.
-        global_subrs: Global subroutines from CFF table.
-    """
-    result = GlyphHintResult()
-
-    try:
-        decompiler = HintExtractingDecompiler(local_subrs, global_subrs)
-        decompiler.execute(charstring)
-        result.hstems = decompiler.hstems
-        result.vstems = decompiler.vstems
-    except Exception as e:
-        logger.debug(f"Decompiler failed: {e}")
-        return result
-
-    if not result.hstems and not result.vstems:
-        return result
-
-    result.has_hints = True
-    return result
-
 
 # ── Stem formatting ──────────────────────────────────────────────────────────
 
@@ -187,26 +39,141 @@ def _format_stem(stem_type: str, pos: float, width: float) -> str:
     return f"{stem_type} {_fmt(pos)} {_fmt(width)}"
 
 
-# ── Point naming ─────────────────────────────────────────────────────────────
+# ── Hint set construction ────────────────────────────────────────────────────
 
 
-def _get_first_oncurve_name(ufo_glyph, used_names: set) -> str | None:
-    """Get or assign a name to the first on-curve point."""
-    for contour in ufo_glyph:
-        for point in contour.points:
-            if point.type != "offcurve":
-                if point.name:
-                    used_names.add(point.name)
-                    return point.name
-                counter = 0
-                while True:
-                    candidate = f"hintRef{counter:04d}"
-                    if candidate not in used_names:
-                        point.name = candidate
-                        used_names.add(candidate)
-                        return candidate
-                    counter += 1
+def _decode_active_stems(masks, hstems, vstems) -> list[str]:
+    """Convert AFDKO boolean mask pair into UFO hint-string list.
+
+    ``masks`` is ``[hhints, vhints]`` where each is a list of bools the same
+    length as the corresponding stem list. Returns formatted ``hstem`` /
+    ``vstem`` strings for stems whose bool is True.
+    """
+    out: list[str] = []
+    h_mask = masks[0] if masks and len(masks) > 0 else None
+    v_mask = masks[1] if masks and len(masks) > 1 else None
+
+    if h_mask is None:
+        for stem in hstems:
+            p, w = stem.UFOVals()
+            out.append(_format_stem("hstem", p, w))
+    else:
+        for stem, on in zip(hstems, h_mask):
+            if on:
+                p, w = stem.UFOVals()
+                out.append(_format_stem("hstem", p, w))
+
+    if v_mask is None:
+        for stem in vstems:
+            p, w = stem.UFOVals()
+            out.append(_format_stem("vstem", p, w))
+    else:
+        for stem, on in zip(vstems, v_mask):
+            if on:
+                p, w = stem.UFOVals()
+                out.append(_format_stem("vstem", p, w))
+    return out
+
+
+def _segment_anchor_index(ufo_contour, segment_idx: int, is_line: bool) -> int | None:
+    """Find the UFO point index for the hint anchor of a path segment.
+
+    UFO contour layout mirrors the AFDKO ``glyphData.drawPoints`` algorithm:
+    index 0 is the wrap point (closing point of the subpath); subsequent
+    points come from segments in order. A line segment contributes 1
+    on-curve point; a curve segment contributes 2 off-curve + 1 on-curve.
+
+    The hint anchor (per ``addUfoHints``) is the END point for a line
+    segment and the FIRST off-curve control point for a curve segment.
+
+    Returns the index of the anchor point in ``ufo_contour.points``, or
+    None if the contour is too short to contain the requested segment.
+    """
+    pts = ufo_contour.points
+    pi = 1  # skip wrap point at index 0
+    seg = 0
+    while pi < len(pts):
+        pt = pts[pi]
+        if pt.type == "line":
+            if seg == segment_idx:
+                return pi if is_line else None
+            seg += 1
+            pi += 1
+        elif pt.type == "offcurve":
+            if seg == segment_idx:
+                return pi if not is_line else None
+            seg += 1
+            pi += 3  # 2 off-curves + 1 on-curve "curve"
+        else:
+            pi += 1
     return None
+
+
+def _allocate_hint_ref(used_names: set[str], counter: list[int]) -> str:
+    """Generate the next unused ``hintRefNNNN`` name."""
+    while True:
+        candidate = f"hintRef{counter[0]:04d}"
+        counter[0] += 1
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+
+
+def _build_hint_set_list(gd, ufo_glyph) -> list[dict[str, Any]]:
+    """Walk a glyphData and the UFO outline in lockstep, attaching
+    hintRef names and producing the hintSetList entries.
+
+    Each hint event in the charstring (``startmasks`` plus any
+    pathElement carrying a ``masks`` field) becomes one hintSetList
+    entry; the entry's ``pointTag`` references the UFO point at which
+    that hint set becomes active.
+    """
+    used_names: set[str] = {
+        p.name for c in ufo_glyph for p in c.points if p.name
+    }
+    counter = [0]
+    hint_set_list: list[dict[str, Any]] = []
+
+    # Initial hint set is always emitted (matching AFDKO addUfoHints
+    # at startSubpath): when gd.startmasks is None, all stems are
+    # treated as active. This is required so makeotf finds an anchor
+    # point even for glyphs with no hint substitution.
+    if (gd.hstems or gd.vstems) and len(ufo_glyph) > 0 and len(ufo_glyph[0].points) > 0:
+        wrap_pt = ufo_glyph[0].points[0]
+        if not wrap_pt.name:
+            wrap_pt.name = _allocate_hint_ref(used_names, counter)
+        else:
+            used_names.add(wrap_pt.name)
+        hint_set_list.append({
+            "pointTag": wrap_pt.name,
+            "stems": _decode_active_stems(
+                gd.startmasks, gd.hstems, gd.vstems
+            ),
+        })
+
+    for sp_idx, subpath in enumerate(gd.subpaths):
+        if sp_idx >= len(ufo_glyph):
+            break
+        ufo_contour = ufo_glyph[sp_idx]
+        # Last pathElement closes the subpath and is drawn as the wrap
+        # point (already named above for subpath 0 via startmasks).
+        for pe_idx, pe in enumerate(subpath[:-1]):
+            if not pe.masks:
+                continue
+            anchor_idx = _segment_anchor_index(ufo_contour, pe_idx, pe.isLine())
+            if anchor_idx is None:
+                continue
+            pt = ufo_contour.points[anchor_idx]
+            if not pt.name:
+                pt.name = _allocate_hint_ref(used_names, counter)
+            else:
+                used_names.add(pt.name)
+            hint_set_list.append({
+                "pointTag": pt.name,
+                "stems": _decode_active_stems(pe.masks, gd.hstems, gd.vstems),
+            })
+
+    return hint_set_list
 
 
 # ── Build UFO hint dict ──────────────────────────────────────────────────────
@@ -214,46 +181,51 @@ def _get_first_oncurve_name(ufo_glyph, used_names: set) -> str | None:
 
 def _build_hint_dict(
     glyph_name: str,
-    hint_result: GlyphHintResult,
+    charstring,
     ufo_glyph,
     outline_hash: str,
 ) -> dict[str, Any] | None:
-    """Build com.adobe.type.autohint.v2 dict from extracted CFF hints.
+    """Build com.adobe.type.autohint.v2 dict from a CFF charstring.
 
-    Creates a single hint set with all stems. Hint substitution (multiple
-    hint sets with hintmask-based selection) is not yet supported -- all
-    stem data is preserved in one set.
+    Uses ``afdko.otfautohint.otfFont.convertT2ToGlyphData`` to parse the
+    charstring (stems + hintmask events) and emits one hintSetList entry
+    per hint-substitution point. For glyphs without hint substitution,
+    a single entry is produced.
     """
-    if not hint_result.has_hints:
+    from afdko.otfautohint.otfFont import convertT2ToGlyphData
+
+    try:
+        gd = convertT2ToGlyphData(
+            charstring,
+            readStems=True,
+            readFlex=False,
+            roundCoords=True,
+            name=glyph_name,
+        )
+    except Exception as e:
+        logger.debug(f"convertT2ToGlyphData failed for '{glyph_name}': {e}")
         return None
 
-    used_names: set[str] = set()
-    for contour in ufo_glyph:
-        for point in contour.points:
-            if point.name:
-                used_names.add(point.name)
-
-    # Build single hint set with all stems
-    all_stems = []
-    for pos, width in hint_result.hstems:
-        all_stems.append(_format_stem("hstem", pos, width))
-    for pos, width in hint_result.vstems:
-        all_stems.append(_format_stem("vstem", pos, width))
-
-    if not all_stems:
+    if not gd.hstems and not gd.vstems:
         return None
 
-    # Assign pointTag to first on-curve point
-    point_tag = _get_first_oncurve_name(ufo_glyph, used_names)
-
-    entry: dict[str, Any] = {"stems": all_stems}
-    if point_tag:
-        entry["pointTag"] = point_tag
+    hint_set_list = _build_hint_set_list(gd, ufo_glyph)
+    if not hint_set_list:
+        # Hints exist but we couldn't anchor them (degenerate outline).
+        # Fall back to a single entry without pointTag.
+        all_stems = [
+            _format_stem("hstem", *s.UFOVals()) for s in gd.hstems
+        ] + [
+            _format_stem("vstem", *s.UFOVals()) for s in gd.vstems
+        ]
+        if not all_stems:
+            return None
+        hint_set_list = [{"stems": all_stems}]
 
     return {
         "formatVersion": "1",
         "id": outline_hash,
-        "hintSetList": [entry],
+        "hintSetList": hint_set_list,
     }
 
 
@@ -308,11 +280,6 @@ def extract_cff_hints(
         )
         return 0, warnings
 
-    # Get subroutines (must be passed explicitly to decompiler)
-    private = top_dict.Private
-    local_subrs = getattr(private, "Subrs", [])
-    global_subrs = getattr(cff, "GlobalSubrs", [])
-
     glyph_order = list(char_strings.keys())
     hint_count = 0
     error_count = 0
@@ -334,17 +301,6 @@ def extract_cff_hints(
         except Exception:
             continue
 
-        try:
-            hint_result = _execute_charstring(charstring, local_subrs, global_subrs)
-        except Exception as e:
-            error_count += 1
-            if error_count <= 5:
-                logger.debug(f"Hint extraction failed for '{glyph_name}': {e}")
-            continue
-
-        if not hint_result.has_hints:
-            continue
-
         ufo_glyph = ufo_font[glyph_name]
 
         # Compute outline hash for staleness detection
@@ -353,8 +309,17 @@ def extract_cff_hints(
         except Exception:
             outline_hash = ""
 
-        # Build the hint dict
-        hint_dict = _build_hint_dict(glyph_name, hint_result, ufo_glyph, outline_hash)
+        # Build the hint dict (parses charstring via afdko.otfautohint)
+        try:
+            hint_dict = _build_hint_dict(
+                glyph_name, charstring, ufo_glyph, outline_hash
+            )
+        except Exception as e:
+            error_count += 1
+            if error_count <= 5:
+                logger.debug(f"Hint extraction failed for '{glyph_name}': {e}")
+            continue
+
         if hint_dict is None:
             continue
 

@@ -36,6 +36,7 @@ class ProcessResult:
     glyphs_with_hints: int = 0
     optimized: bool = False
     optimized_count: int = 0
+    autohinted: bool = False
     error: str | None = None
 
 
@@ -57,9 +58,15 @@ def process_font(
     For UFO inputs, the hint source is selected via ``hint_source``:
 
     - ``auto``: whole-font priority ``PROCESSED_LAYER > AUTOHINT_V2 > PUBLIC_PS``;
-      the first source containing hints in at least one glyph wins.
+      the first source containing hints in at least one glyph wins. If the UFO
+      has no hints in any source, ``afdko.otfautohint`` is run on the working
+      UFO and its output is used (``ProcessResult.autohinted = True``).
     - ``processed`` / ``v2`` / ``public_ps``: force the given source.
       If the font has no hints in that source at all, returns failure.
+
+    For binary inputs, hints are extracted from CFF charstrings; if extraction
+    yields no hints (e.g. an unhinted CFF or any TTF), ``afdko.otfautohint``
+    is run on the extracted UFO before compilation.
 
     Glyphs without hints in the chosen source land in the output without hints.
 
@@ -109,6 +116,7 @@ def process_font(
 
         from ufo_tdkit_tools.ps_hints.batch import (
             count_glyphs_with_source,
+            detect_font_source,
             export_all_from_processed,
             import_all_to_processed,
             optimize_font,
@@ -117,17 +125,32 @@ def process_font(
 
         had_processed_layer = PROCESSED_LAYER_NAME in [layer.name for layer in font.layers]
 
-        source = _resolve_source(font, hint_source, is_binary, log)
-        if source is None:
-            return ProcessResult(
-                success=False,
-                error=f"No hints found for hint_source={hint_source!r}",
-            )
+        autohinted = False
+        if is_binary:
+            source = HintSource.AUTOHINT_V2
+            if count_glyphs_with_source(font, source) == 0:
+                font = _autohint_in_place(font, log)
+                source = HintSource.PROCESSED_LAYER
+                autohinted = True
+        elif hint_source == "auto":
+            source = detect_font_source(font)
+            if source is None:
+                font = _autohint_in_place(font, log)
+                source = HintSource.PROCESSED_LAYER
+                autohinted = True
+        else:
+            source = _resolve_source(font, hint_source, is_binary, log)
+            if source is None:
+                return ProcessResult(
+                    success=False,
+                    error=f"No hints found for hint_source={hint_source!r}",
+                )
 
         glyphs_total = len(font)
         glyphs_with_hints = count_glyphs_with_source(font, source)
         log.info(
-            f"pipeline: source={source.value} glyphs={glyphs_total} with_hints={glyphs_with_hints}"
+            f"pipeline: source={source.value} glyphs={glyphs_total} "
+            f"with_hints={glyphs_with_hints} autohinted={autohinted}"
         )
 
         optimized_count = 0
@@ -176,6 +199,7 @@ def process_font(
                 glyphs_with_hints=glyphs_with_hints,
                 optimized=optimize,
                 optimized_count=optimized_count,
+                autohinted=autohinted,
                 error="OTF compilation failed",
             )
 
@@ -187,6 +211,7 @@ def process_font(
             glyphs_with_hints=glyphs_with_hints,
             optimized=optimize,
             optimized_count=optimized_count,
+            autohinted=autohinted,
         )
     except Exception as e:
         log.exception("pipeline: unexpected failure")
@@ -219,6 +244,28 @@ def _load_input(input_path: Path, work_dir: str, is_binary: bool):
     shutil.copytree(input_path, work_ufo)
     font = fp.OpenFont(str(work_ufo), showInterface=False)
     return font, None
+
+
+def _autohint_in_place(font, log: logging.Logger):
+    """Run ``afdko.otfautohint`` on the working UFO and return a reloaded font.
+
+    The autohinter writes hints to the processedglyphs layer of the on-disk
+    UFO. We drop the in-memory font, invoke ``hintFiles`` on the path, and
+    reopen — the caller proceeds with ``HintSource.PROCESSED_LAYER``.
+    """
+    import fontParts.world as fp
+    from afdko.otfautohint.autohint import ACOptions, hintFiles
+
+    ufo_path = str(font.path)
+    log.info(f"pipeline: running otfautohint on {ufo_path}")
+
+    options = ACOptions()
+    options.inputPaths = [ufo_path]
+    options.outputPaths = [ufo_path]
+    options.allowNoBlues = True
+    hintFiles(options)
+
+    return fp.OpenFont(ufo_path, showInterface=False)
 
 
 def _resolve_source(font, hint_source: str, is_binary: bool, log: logging.Logger):

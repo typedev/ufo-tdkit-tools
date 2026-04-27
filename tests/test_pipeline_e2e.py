@@ -33,8 +33,8 @@ from ufo_tdkit_tools.pipeline import process_font  # noqa: E402
 # ── UFO factory ───────────────────────────────────────────────────────────────
 
 
-def _build_minimal_ufo(ufo_path):
-    """Build a tiny UFO with one rectangle glyph carrying a single v-stem hint."""
+def _build_minimal_ufo(ufo_path, *, with_hints=True):
+    """Build a tiny UFO with one rectangle glyph; optional v-stem/h-stem hint."""
     import defcon
 
     font = defcon.Font()
@@ -76,15 +76,16 @@ def _build_minimal_ufo(ufo_path):
     # name first on-curve point so v2 pointTag has a target
     glyph[0][0].name = "hintRef0000"
 
-    # Single v-stem covering the rectangle width (100..500 -> width 400)
-    glyph.lib[ADOBE_HINT_KEY_V2] = {
-        "hintSetList": [
-            {
-                "pointTag": "hintRef0000",
-                "stems": ["vstem 100 400", "hstem 0 700"],
-            }
-        ],
-    }
+    if with_hints:
+        # Single v-stem covering the rectangle width (100..500 -> width 400)
+        glyph.lib[ADOBE_HINT_KEY_V2] = {
+            "hintSetList": [
+                {
+                    "pointTag": "hintRef0000",
+                    "stems": ["vstem 100 400", "hstem 0 700"],
+                }
+            ],
+        }
 
     font.save(str(ufo_path))
 
@@ -136,6 +137,20 @@ class TestPipelineEndToEnd:
         )
         assert result.success is False
         assert "no hints" in result.error.lower()
+
+    def test_unhinted_ufo_auto_triggers_autohint(self, tmp_path):
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        ufo_out = tmp_path / "out.ufo"
+
+        _build_minimal_ufo(ufo_in, with_hints=False)
+        result = process_font(ufo_in, otf_out, ufo_out, hint_source="auto")
+
+        assert result.success, f"pipeline failed: {result.error}"
+        assert result.autohinted is True
+        assert result.hint_source_used == "processedglyphs"
+        assert otf_out.exists()
+        assert ufo_out.exists()
 
     def test_otf_roundtrip(self, tmp_path):
         # 1. UFO → OTF

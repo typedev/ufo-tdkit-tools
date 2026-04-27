@@ -60,6 +60,7 @@ class TestProcessResult:
         assert r.hint_source_used is None
         assert r.glyphs_total == 0
         assert r.optimized is False
+        assert r.autohinted is False
         assert r.error is None
 
     def test_populated(self):

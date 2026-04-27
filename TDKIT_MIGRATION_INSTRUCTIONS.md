@@ -132,22 +132,28 @@ Changing from `tdkit.compilers.otf_ttf` to `ufo_tdkit_tools.compilation.compiler
 is transparent — Python resolves the function at import time in each worker process.
 No changes to threading model needed.
 
-## Function signatures (MUST remain identical)
+## Function signatures
+
+The migration originally aimed to preserve signatures byte-for-byte. As of the
+makeotf compatibility fix, the `makeotfexe_path` keyword has been renamed to
+`makeotf_path` because the underlying binary changed (recent AFDKO releases
+ship `makeotfexe` as a deprecation stub with no compilation behaviour).
+TDKit callers passing `makeotfexe_path=...` need to update the kwarg name.
 
 ```python
 compile_otf_preserve_optimized(
     ufo_path, otf_path, logger=None, pshash_rebuild=False,
-    tx_path=None, makeotfexe_path=None, stats=None
+    tx_path=None, makeotf_path=None, stats=None
 ) -> bool
 
 compile_otf_preserve(
     ufo_path, otf_path, logger=None, pshash_rebuild=False,
-    tx_path=None, makeotfexe_path=None
+    tx_path=None, makeotf_path=None
 ) -> bool
 
 is_preserve_mode(pshinter) -> bool
 
-preserve_compile(ufo_path, otf_path, logger=None, tx_path=None, makeotfexe_path=None) -> PreserveCompileResult
+preserve_compile(ufo_path, otf_path, logger=None, tx_path=None, makeotf_path=None) -> PreserveCompileResult
 
 preserve_compile_batch(input_dir, output_dir, logger=None, parallel=False, workers=None, on_progress=None) -> BatchCompileResult
 

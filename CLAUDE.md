@@ -22,6 +22,8 @@ uv build                                         # Build wheel
 Three main workflows, each in its own subpackage under `src/ufo_tdkit_tools/`:
 
 1. **`extraction/`** — Binary font (OTF/TTF/WOFF/WOFF2) → in-memory UFO. Uses `ufo-extractor` for bulk work plus custom CFF hint extraction from PostScript charstrings. Optional dependency group `[extraction]`.
+   - `converter.py`: Top-level pipeline (`convert_binary_to_ufo`) and FEA post-processing — `_unify_feature_blocks` (one block per tag with internal script/language scoping), `_inline_aalt_lookups` (Adobe FEA spec compliance — `aalt` rejects `lookup` references), `_strip_lookup_noise`, `_strip_empty_gdef`. Drops the auto-generated `kern` feature.
+   - `cff_hints.py`: Per-glyph hint extraction. Uses `afdko.otfautohint.otfFont.convertT2ToGlyphData` to parse stems, `startmasks`, per-pathElement `masks`, and `cntr` (counter masks). Emits multi-entry `hintSetList` mirroring AFDKO's canonical `addUfoHints` algorithm: hint anchors are line endpoints or first off-curve control points; counter-masked orientations collapse into `hstem3`/`vstem3` triplets. Also fills the font-level Private dict (`BlueValues`, `OtherBlues`, `StemSnap*`, etc.) and reorders `postscriptStemSnapH/V` so the CFF `StdHW`/`StdVW` value sits at index 0 (ufo2ft picks `StdHW = StemSnapH[0]` at compile time).
 
 2. **`ps_hints/`** — Hint parsing, optimization, analysis, validation, and layer conversion. Always available (core dep: fontTools only).
    - `parser.py`: Data models (`PSHint`, `PSHintSet`, `PSHintData`, `HintSource` enum) and parsing from UFO glyph lib entries.
@@ -30,9 +32,20 @@ Three main workflows, each in its own subpackage under `src/ufo_tdkit_tools/`:
    - `converter.py`: Move hints between the processedglyphs layer, glyph lib, and default layer.
    - `validator.py`: Validate hints across an entire UFO.
 
-3. **`compilation/`** — UFO → OTF with hint preservation. Hybrid pipeline: ufo2ft creates an unhinted OTF shell, then tx+makeotfexe create a hinted OTF, per-glyph charstrings are merged, and cffsubr subroutinizes the result. Optional dependency group `[compilation]`. Supports batch processing via `ProcessPoolExecutor` (functions are pure/stateless).
+3. **`compilation/`** — UFO → OTF with hint preservation. Hybrid pipeline: ufo2ft creates an unhinted OTF shell with correct metadata; `tx -t1` + `makeotf` (the wrapper, not the deprecated `makeotfexe` stub) builds a hinted OTF from the UFO; per-glyph charstrings and the Private dict hint params are merged into the shell; `cffsubr` subroutinizes the result. Optional dependency group `[compilation]`. Supports batch processing via `ProcessPoolExecutor` (each worker spawns its own `makeotf` subprocess — no shared state).
 
 **`constants.py`** — Shared lib keys (`com.adobe.type.autohint.v2`, `public.postscript.hints`, etc.), processed layer names, validation constants, and `compute_outline_hash()` (must match AFDKO's HashPointPen algorithm).
+
+## Hint round-trip fidelity
+
+The OTF → UFO → OTF round-trip preserves:
+
+- All declared `hstem`/`vstem` positions and widths byte-for-byte.
+- Hint substitution (`hintmask` operators) for glyphs whose substitution points are inside contours, via multi-entry `hintSetList`.
+- Counter-mask grouping (`cntrmask` → `hstem3`/`vstem3` triplets).
+- Font-level Private dict values including `StdHW`/`StdVW` (via the `postscriptStemSnapH/V[0]` convention).
+
+Known limitation: hint substitutions that fire **between subpaths** (a `hintmask` immediately before a `moveto`, common on disconnected glyphs like `i`, `j`, dieresis-bearing letters) are not representable in the `autohint.v2` format and degrade to a single hint set. AFDKO's own autohint output exhibits the same limitation.
 
 ## Key Design Patterns
 
@@ -40,6 +53,7 @@ Three main workflows, each in its own subpackage under `src/ufo_tdkit_tools/`:
 - **Hint source priority**: PROCESSED_LAYER > AUTOHINT_V2 > PUBLIC_PS — the processedglyphs layer is the canonical hint storage
 - **Dataclasses** for all data structures and result objects
 - **Stateless functions** for compilation — enables safe parallel processing
+- **AFDKO Python API over subprocess** where possible — extraction calls `afdko.otfautohint` Python functions in-process; compilation still subprocesses `tx` and `makeotf` because they're external binaries
 
 ## Code Style
 

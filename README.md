@@ -19,20 +19,30 @@ pip install ufo-tdkit-tools[all]               # everything
 
 ## Quick start
 
+The simplest path is the `process_font` pipeline — any input (binary or
+UFO, hinted or not) becomes a hinted OTF + a clean UFO:
+
 ```python
-from ufo_tdkit_tools.extraction import convert_binary_to_ufo
-from ufo_tdkit_tools.ps_hints import optimize_hints, parse_ps_hints
-from ufo_tdkit_tools.compilation import preserve_compile
+from ufo_tdkit_tools import process_font
 
-# Extract: OTF -> UFO with hints
-result = convert_binary_to_ufo("input.otf", "output.ufo")
-
-# Optimize hints in UFO
-# ... (see ps_hints module docs)
-
-# Compile: UFO -> OTF preserving hints
-result = preserve_compile("output.ufo", "optimized.otf")
+result = process_font(
+    "input.otf",          # OTF / TTF / WOFF / WOFF2 / UFO
+    "out.otf",
+    "out.ufo",
+    hint_source="auto",   # priority: processed > v2 > public_ps
+    optimize=False,       # set True to run the ps_hints optimizer
+)
+assert result.success
+print(result.glyphs_with_hints, "/", result.glyphs_total,
+      "autohinted=", result.autohinted)
 ```
+
+If the input has no hints, the pipeline runs `afdko.otfautohint`
+automatically (`result.autohinted is True`).
+
+For the lower-level entry points (`extraction.convert_binary_to_ufo`,
+`compilation.compile_otf_preserve_optimized`, the `ps_hints` parser /
+optimizer / validator / batch wrappers), see [`docs/API.md`](docs/API.md).
 
 ## Round-trip fidelity
 

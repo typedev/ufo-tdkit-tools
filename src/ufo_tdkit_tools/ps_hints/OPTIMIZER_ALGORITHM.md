@@ -30,27 +30,32 @@ resolving all conflicts the autohinter left behind.
                (keep all)     (keep as-is)    (optimize)
                      │               │               │
                      │               │     ┌─────────┴─────────┐
-                     │               │     │ Step 1: Too-wide   │
-                     │               │     │ filter (>3× snap)  │
+                     │               │     │ Step 1: Snap-compat│
+                     │               │     │ filter (20%, ≥5u)  │
                      │               │     └─────────┬─────────┘
                      │               │               │
                      │               │     ┌─────────┴─────────┐
-                     │               │     │ Step 2: Coverage   │
+                     │               │     │ Step 2: Accent-zone│
+                     │               │     │ filter (Unicode NFD)│
+                     │               │     └─────────┬─────────┘
+                     │               │               │
+                     │               │     ┌─────────┴─────────┐
+                     │               │     │ Step 3: Coverage   │
                      │               │     │ map (ray casting)  │
                      │               │     └─────────┬─────────┘
                      │               │               │
                      │               │     ┌─────────┴─────────┐
-                     │               │     │ Step 3: Small      │
+                     │               │     │ Step 4: Small      │
                      │               │     │ element filter     │
                      │               │     └─────────┬─────────┘
                      │               │               │
                      │               │     ┌─────────┴─────────┐
-                     │               │     │ Step 4: vstem3     │
+                     │               │     │ Step 5: vstem3     │
                      │               │     │ detection (C(N,3)) │
                      │               │     └─────────┬─────────┘
                      │               │               │
                      │               │     ┌─────────┴─────────┐
-                     │               │     │ Step 5: Overlap    │
+                     │               │     │ Step 6: Overlap    │
                      │               │     │ resolution (L/R)   │
                      │               │     └─────────┬─────────┘
                      │               │               │
@@ -64,28 +69,136 @@ resolving all conflicts the autohinter left behind.
 
 ---
 
-## Step 1: Too-Wide Stem Removal
+## Step 1: Snap-Compatibility Filter
 
-**Rule:** Remove vstems wider than `max(stemSnapV) × 3.0` (or `UPM × 0.3` if no snap values).
+**Rule:** A vstem is kept iff its width lies within tolerance of **at least one**
+`stemSnapV` value. Tolerance per snap is `max(5.0, snap × 0.20)` — 20% of the snap
+value with a 5-unit floor.
 
-**Why:** Very wide "stems" are artifacts — they typically span the full glyph width or
-cover counters, not actual vertical strokes. A stem of 300 units in a font with
-stemSnap of 80 is clearly not a real stem.
+**Why scale with snap, not UPM?** Stem width spans a huge range across weights
+(Thin ≈ 20, Black ExtraWide ≈ 400) for the same UPM. A fixed absolute or UPM-based
+threshold over-shoots one end and under-shoots the other. `stemSnapV` already encodes
+the font's design widths, so scaling tolerance off it gives a uniform "this stem is
+or isn't a design stem" criterion at every weight.
 
-**Example:**
+**Tolerance examples:**
+
+| `stemSnap` value | Tolerance | Accepted range |
+|---|---|---|
+| 20  | 5  | [15, 25] |
+| 60  | 12 | [48, 72] |
+| 80  | 16 | [64, 96] |
+| 200 | 40 | [160, 240] |
+| 400 | 80 | [320, 480] |
+
+**Multi-snap example (`stemSnapV = [50, 55, 60]`):**
 ```
-Font: stemSnapV = [82], UPM = 1000
-Max allowed: 82 × 3 = 246 units
-
-Glyph hints:
-  vstem  80  82    ← keep (real stem, w=82)
-  vstem 200 260    ← REMOVE (w=260 > 246, counter artifact)
-  vstem 460  84    ← keep (real stem, w=84)
+Per-snap windows: [40, 60] ∪ [44, 66] ∪ [48, 72] = [40, 72]
+A stem of 70 is kept (close to 60). A stem of 75 is removed.
 ```
+
+**Gap example (`stemSnapV = [50, 100]`):**
+```
+Per-snap windows: [40, 60] ∪ [80, 120]
+A stem of 70 is removed (not near any snap — likely a counter artifact).
+```
+
+**Fallback:** if `stemSnapV` is empty, use the legacy `width > UPM × 0.3` cut.
 
 ---
 
-## Step 2: Coverage Map (Filled Height Metric)
+## Step 2: Accent-Zone Filter (Unicode NFD)
+
+For glyphs whose codepoint NFD-decomposes into a base + combining marks, hints
+falling entirely in the accent's vertical zone are removed — both H and V.
+
+### Detection
+
+1. Resolve the glyph's primary codepoint. Prefer `glyph.unicodes[0]`; fall back to
+   `fontTools.agl.toUnicode(glyph.name.split(".", 1)[0])` to handle suffixed names
+   (`dcaron.alt`, `aacute.sc`). Adobe PUA codepoints (U+E000–U+F8FF, supplementary
+   PUAs) are treated as "no codepoint" — these come from legacy names like `cyrbreve`
+   that don't represent a real precomposed character.
+
+2. Apply `unicodedata.normalize("NFD", chr(cp))`. If the result has length ≥ 2 the
+   glyph is an accented composite. Every combining mark (`category == "Mn"`) is
+   classified by its canonical combining class (`unicodedata.combining()`):
+   - CCC ∈ {200, 202, 218, 220, 222, 233, 240} → below-accent
+     (cedilla CCC 202, ogonek CCC 202, dot below CCC 220, comma below CCC 220, …)
+   - CCC ∈ {214, 216, 228, 230, 232, 234} → above-accent
+     (acute, breve, caron, dieresis, macron, … all CCC 230)
+
+   Name-substring (`"BELOW"`) is not used — it misses CEDILLA and OGONEK which
+   sit below but have no "BELOW" token in their Unicode name.
+
+3. A glyph can carry **both** above and below marks (Vietnamese `ợ` = horn + dot
+   below). Both zones get cut independently.
+
+### Zone bounds
+
+The cut threshold comes from the base glyph's actual outline when possible —
+this handles the ascender/xHeight distinction automatically:
+
+```
+Above zone = base_glyph.bounds.yMax + 5
+Below zone = base_glyph.bounds.yMin − 5
+```
+
+For `dcaron`: base = `d`, yMax ≈ ascender → caron cut, d preserved.
+For `aacute`: base = `a`, yMax ≈ xHeight → acute cut, a preserved.
+
+**Soft-dotted bases (i, j, ї, ј, …)** require special handling: the bare base
+glyph (e.g., `i`) carries a tittle that gets *replaced* by the accent in the
+composite (`idieresis`, `afii10104`). Using `i.bounds.yMax` would place the
+threshold above the accent and miss it. For these bases (Unicode `Soft_Dotted`
+property — Latin i/j and variants, Cyrillic і/ј, Greek yot) the threshold is
+`info.xHeight + 5` regardless of whether the base glyph exists.
+
+**Fallbacks** when the base glyph isn't in the UFO:
+- Above: `info.capHeight + 5` for Lu base; `info.xHeight + 5` for soft-dotted
+  Ll bases; `info.ascender + 5` for other Ll/Lt (safer than xHeight — never
+  clips an ascender on `dcaron`, `lcaron`, etc.).
+- Below: `−5` (just below baseline).
+
+### Cut criteria
+
+- **hstem**: removed when `hstem.position ≥ above_y` or `hstem.end ≤ below_y`.
+  Direct test — hstem coordinates are Y.
+- **vstem**: point-based detection on the stem's vertical edges. For
+  each vstem the optimizer collects all contour points (decomposing
+  components first via `DecomposingRecordingPen`) whose X falls within
+  ±3 units of the stem's left edge (`stem.position`) or right edge
+  (`stem.position + stem.width`). These points sit on the vertical edges
+  of the stroke the vstem represents. If **every** such point's Y
+  coordinate falls in the accent zone (`≥ above_y − 5` or `≤ below_y + 5`),
+  the stem belongs to the accent and is removed.
+
+  Three regimes are handled by the same rule:
+
+  * **Separate-contour accents** — decomposed `Adieresis` dots: only
+    the dot contour has points at the stem's X edges; all Y values lie
+    above capHeight → remove.
+  * **Integrated accents** — `Ccedilla`/`Aogonek` where the cedilla or
+    ogonek is fused with the base contour: the accent's vertical edges
+    sit at X values where the base body has no points (e.g. the cedilla
+    in DIN's Ccedilla has on-curve points at X=314 and X=399, while the
+    C body's nearest X positions are 306, 346, 385, 461). All edge points
+    are below baseline → remove.
+  * **Base-body stems under any accent** — `Iacute`'s I-body vstem
+    (X 86 to 201): the I body has on-curve points at the same X spanning
+    from baseline to capHeight. Not all in the accent zone → keep.
+
+  Earlier attempts (X-bbox containment, edge-matching on per-contour
+  bboxes) misfired on integrated accents because they have no separate
+  bbox. The point-based test works without needing the accent to be its
+  own contour.
+
+This is the primary line of defense against accent stems. The geometric small-element
+filter (Step 4) still runs as a fallback for non-Unicode and AGL-unknown glyphs.
+
+---
+
+## Step 3: Coverage Map (Filled Height Metric)
 
 When a `glyph` object is provided, the optimizer builds a **coverage map** — for each
 vstem, it measures how much actual filled contour exists at the stem's X position.
@@ -125,7 +238,13 @@ expand all components into flat contours before segment extraction.
 
 ---
 
-## Step 3: Small Element Filtering
+## Step 4: Small Element Filtering (geometric fallback)
+
+This step still runs after the Unicode-based accent filter, primarily catching:
+- Glyphs without Unicode codepoints (custom alternates, ligatures)
+- Glyphs whose name isn't in AGL (`cyrabreve`, `palochka.alt`)
+- Composite-glyph leg artifacts that aren't accents (Cyrillic Д, Ц legs)
+
 
 Stems belonging to accent marks, descender legs, or other minor glyph elements should
 not participate in vstem3 detection or overlap resolution — they produce false positives.
@@ -251,7 +370,7 @@ position ±3, width ±5 tolerance) are classified as accent vstems and removed.
 
 ---
 
-## Step 4: vstem3 Detection
+## Step 5: vstem3 Detection
 
 **Critical:** vstem3 detection runs BEFORE overlap resolution. If it ran after,
 the overlap step would eliminate valid triple candidates.
@@ -301,7 +420,7 @@ with the rightmost triple stem from surviving into the overlap resolution phase.
 
 ---
 
-## Step 5: Overlap Resolution
+## Step 6: Overlap Resolution
 
 ### Vertical Stems
 
@@ -363,7 +482,7 @@ It returns a list of `(pattern_tag, detail_string)` tuples for UI display.
 
 | Tag | Description |
 |-----|-------------|
-| `too-wide-v` | vstem wider than 3× max stemSnap |
+| `snap-incompatible-v` | vstem width not within ~20% of any stemSnap value |
 | `centric-overlap` | Cross-side vstem overlap (narrow glyphs) |
 | `overlap-v` | Same-side vstem overlap |
 | `overlap-h` | Horizontal stem overlap |
@@ -416,17 +535,19 @@ processedglyphs layer glyph.lib updated
 
 | Constant | Value | Used in |
 |----------|-------|---------|
-| Too-wide multiplier | 3.0× stemSnap (or 0.3× UPM) | Step 1 |
-| Small element threshold | 40% of max coverage | Step 3 |
-| Accent zone threshold | 70% of coverage outside main body | Step 3 |
-| Touch tolerance | 3.0 units | Step 3 |
-| Composite match tolerance | position ±3, width ±5 | Step 3 (composites) |
-| vstem3 width tolerance | 1.0 unit | Step 4 |
-| vstem3 spacing tolerance | 1.0 unit | Step 4 |
-| Coverage significance | >2× ratio AND >100 units diff | Step 5 |
-| Mixed width threshold | >15% or >10 units | Step 5 |
-| Snap distance significance | >0.5 units difference | Step 5 |
-| Coverage weight in scoring | 5.0 font units equivalent | Step 5 |
+| Snap tolerance (per snap) | `max(5, snap × 0.20)` | Step 1 |
+| Snap fallback (no stemSnapV) | `width > UPM × 0.3` | Step 1 |
+| Accent-zone buffer | 5 units around base bbox / metric | Step 2 |
+| Small element threshold | 40% of max coverage | Step 4 |
+| Accent zone threshold (geometric) | 70% of coverage outside main body | Step 4 |
+| Touch tolerance | 3.0 units | Step 4 |
+| Composite match tolerance | position ±3, width ±5 | Step 4 (composites) |
+| vstem3 width tolerance | 1.0 unit | Step 5 |
+| vstem3 spacing tolerance | 1.0 unit | Step 5 |
+| Coverage significance | >2× ratio AND >100 units diff | Step 6 |
+| Mixed width threshold | >15% or >10 units | Step 6 |
+| Snap distance significance | >0.5 units difference | Step 6 |
+| Coverage weight in scoring | 5.0 font units equivalent | Step 6 |
 
 ---
 

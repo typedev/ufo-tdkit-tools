@@ -8,7 +8,8 @@ Cleans up autohinter output by collapsing multiple hint sets into a single
 optimized set. Fixes common autohinter issues:
 
 1. Overlapping vstems -- keeps leftmost on left side, rightmost on right side
-2. Too-wide vstems -- removes stems wider than 3x max stemSnap value
+2. Snap-incompatible vstems -- removes stems whose width is not within
+   ~20% (floor 5u) of any stemSnap value
 3. Centric glyphs -- for narrow glyphs (i, j, l), keeps narrower stem
 4. Triple stem detection -- 3 equally-spaced similar-width vstems -> vstem3
 5. Horizontal stems -- merges all hstems, deduplicates
@@ -17,8 +18,10 @@ optimized set. Fixes common autohinter issues:
    stems win over small descender/ascender elements)
 
 Pipeline order:
-  collect stems -> separate ghosts/triples -> remove too-wide
-  -> extract vstem3 (before overlaps!) -> resolve overlaps -> merge hstems
+  collect stems -> separate ghosts/triples -> snap-compat filter
+  -> accent-zone filter (Unicode NFD) -> coverage map -> small-element
+  filter -> extract vstem3 (before overlaps!) -> resolve overlaps
+  -> merge hstems
 """
 
 from __future__ import annotations
@@ -79,28 +82,36 @@ def optimize_hints(
     all_vstems = [s for s in all_vstems if not s.is_triple]
     all_hstems = [s for s in all_hstems if not s.is_triple]
 
-    # Step 1: Remove too-wide vstems
-    max_width = _max_stem_width(stem_snap_v, upm)
-    all_vstems = [s for s in all_vstems if s.width <= max_width]
+    # Step 1: Remove vstems incompatible with stemSnapV
+    if stem_snap_v:
+        all_vstems = [s for s in all_vstems if _is_snap_compatible(s.width, stem_snap_v)]
+    else:
+        max_width = upm * 0.3
+        all_vstems = [s for s in all_vstems if s.width <= max_width]
 
-    # Step 2: Build coverage map if glyph contours are available
+    # Step 2: Accent-zone filter (Unicode NFD-confirmed accented glyphs only)
+    all_vstems, all_hstems = _apply_accent_zone_filter(all_vstems, all_hstems, glyph)
+
+    # Step 3: Build coverage map if glyph contours are available
     coverage_map = _build_coverage_map(all_vstems, glyph)
 
-    # Step 3: Filter small-element vstems (legs, tails, accent dots)
-    # MUST happen before vstem3 to prevent accent dots forming false triples
+    # Step 4: Filter small-element vstems (legs, tails, accent dots).
+    # Geometric fallback for glyphs the Unicode-based filter missed
+    # (non-Unicode, AGL-unknown, or composite legs that aren't accents).
+    # MUST happen before vstem3 to prevent accent dots forming false triples.
     if coverage_map:
         all_vstems = _filter_small_element_vstems(all_vstems, coverage_map, glyph)
         coverage_map = {s.raw: coverage_map[s.raw] for s in all_vstems
                         if s.raw in coverage_map}
 
-    # Step 4: Extract vstem3 candidates BEFORE overlap resolution
+    # Step 5: Extract vstem3 candidates BEFORE overlap resolution
     all_vstems, new_triples = _extract_vstem3(all_vstems, stem_snap_v)
     triple_vstems.extend(new_triples)
 
-    # Step 5: Optimize remaining vstems (overlap resolution)
+    # Step 6: Optimize remaining vstems (overlap resolution)
     vstems = _optimize_vstems(all_vstems, glyph_width, stem_snap_v, upm, coverage_map)
 
-    # Step 4: Optimize hstems (resolve overlaps)
+    # Step 7: Optimize hstems (resolve overlaps)
     hstems = _optimize_hstems(all_hstems, stem_snap_h)
 
     # Build single hint set
@@ -385,6 +396,334 @@ def _build_coverage_map(
         coverage_map[stem.raw] = _compute_stem_height_coverage(stem, segments)
 
     return coverage_map
+
+
+# ── Accent zone filtering (Unicode-based) ────────────────────────────────────
+
+
+def _is_pua_codepoint(cp: int) -> bool:
+    """Adobe Symbol Encoding maps some legacy glyph names to PUA codepoints."""
+    return (
+        0xE000 <= cp <= 0xF8FF
+        or 0xF0000 <= cp <= 0xFFFFD
+        or 0x100000 <= cp <= 0x10FFFD
+    )
+
+
+def _resolve_glyph_codepoint(glyph) -> int | None:
+    """Get the glyph's primary non-PUA codepoint, falling back to AGL.
+
+    For names like 'dcaron.alt', strips suffixes after the first dot before
+    AGL lookup. Returns None for glyphs that map to PUA or aren't in AGL.
+    """
+    unis = getattr(glyph, "unicodes", None)
+    if unis:
+        cp = unis[0]
+        if not _is_pua_codepoint(cp):
+            return cp
+
+    name = getattr(glyph, "name", None)
+    if not name:
+        return None
+    base_name = name.split(".", 1)[0]
+    try:
+        from fontTools import agl
+        s = agl.toUnicode(base_name)
+    except Exception:
+        return None
+    if not s:
+        return None
+    cp = ord(s[0])
+    if _is_pua_codepoint(cp):
+        return None
+    return cp
+
+
+# Canonical combining classes (CCC) for above/below combining marks.
+# Source: Unicode UAX #15 + DerivedCombiningClass.txt.
+_ABOVE_CCC = frozenset({214, 216, 228, 230, 232, 234})
+_BELOW_CCC = frozenset({200, 202, 218, 220, 222, 233, 240})
+
+
+def _glyph_accent_info(glyph) -> tuple[set[str], int | None]:
+    """Detect accent positions via Unicode NFD decomposition.
+
+    Classification uses the combining mark's canonical combining class
+    (``unicodedata.combining``) rather than its name — this catches CEDILLA
+    (CCC 202) and OGONEK (CCC 202) which sit below but lack 'BELOW' in
+    their Unicode name.
+
+    Returns:
+        (positions, base_cp) where positions ⊆ {"above", "below"}.
+        Empty set ⇒ no accent detected (apply no zone filter).
+    """
+    import unicodedata
+
+    cp = _resolve_glyph_codepoint(glyph)
+    if cp is None:
+        return set(), None
+    try:
+        decomp = unicodedata.normalize("NFD", chr(cp))
+    except (ValueError, TypeError):
+        return set(), None
+    if len(decomp) < 2:
+        return set(), cp
+
+    base_cp = ord(decomp[0])
+    positions: set[str] = set()
+    for mark in decomp[1:]:
+        if unicodedata.category(mark) != "Mn":
+            continue
+        ccc = unicodedata.combining(mark)
+        if ccc in _ABOVE_CCC:
+            positions.add("above")
+        elif ccc in _BELOW_CCC:
+            positions.add("below")
+    return positions, base_cp
+
+
+# Soft-dotted bases (Unicode Soft_Dotted.txt): their bare glyph carries a
+# tittle that gets replaced by the accent in composites (idieresis, ї, etc).
+# Using base.bounds.yMax would put the threshold above the accent — so for
+# these bases we use xHeight instead. Only lowercase entries; uppercase
+# variants (I, Ї, J, etc.) have no tittle and behave normally.
+_SOFT_DOTTED_BASE = frozenset({
+    0x0069,  # i  Latin small letter i
+    0x006A,  # j  Latin small letter j
+    0x012F,  # į  Latin small letter i with ogonek
+    0x0249,  # ɉ  Latin small letter j with stroke
+    0x0268,  # ɨ  Latin small letter i with stroke
+    0x029D,  # ʝ  Latin small letter j with crossed-tail
+    0x03F3,  # ϳ  Greek letter yot
+    0x0456,  # і  Cyrillic Byelorussian-Ukrainian i
+    0x0458,  # ј  Cyrillic je
+    0x1E2D,  # ḭ  Latin small letter i with tilde below
+    0x1ECB,  # ị  Latin small letter i with dot below
+})
+
+
+def _accent_zone_bounds(
+    glyph,
+    positions: set[str],
+    base_cp: int | None,
+) -> tuple[float | None, float | None]:
+    """Y thresholds for accent-zone hint removal.
+
+    Returns (above_y, below_y). Hint extent strictly above above_y is an
+    above-accent; strictly below below_y is a below-accent.
+    """
+    import unicodedata
+
+    BUFFER = 5.0
+    above_y: float | None = None
+    below_y: float | None = None
+
+    font = getattr(glyph, "font", None)
+    info = getattr(font, "info", None) if font is not None else None
+
+    # Prefer the actual bounds of the base glyph in this font, except for
+    # soft-dotted bases (i, j) under an above-accent: the tittle in the
+    # bare base glyph isn't present in the composite.
+    base_glyph = None
+    base_via_bbox = base_cp is not None and not (
+        "above" in positions and base_cp in _SOFT_DOTTED_BASE
+    )
+    if font is not None and base_via_bbox:
+        try:
+            for g in font:
+                unis = getattr(g, "unicodes", None)
+                if unis and unis[0] == base_cp:
+                    base_glyph = g
+                    break
+        except Exception:
+            base_glyph = None
+
+    if base_glyph is not None:
+        try:
+            bounds = base_glyph.bounds
+        except Exception:
+            bounds = None
+        if bounds is not None:
+            if "above" in positions:
+                above_y = bounds[3] + BUFFER
+            if "below" in positions:
+                below_y = bounds[1] - BUFFER
+            # If both positions needed but bbox only covers one side, fall
+            # through to fill the other via font metrics
+            if (
+                ("above" in positions) == (above_y is not None)
+                and ("below" in positions) == (below_y is not None)
+            ):
+                return above_y, below_y
+
+    # Fallback to font metrics
+    if info is None:
+        return above_y, below_y
+
+    if "above" in positions and above_y is None:
+        cat = None
+        if base_cp is not None:
+            try:
+                cat = unicodedata.category(chr(base_cp))
+            except (ValueError, TypeError):
+                cat = None
+        if cat == "Lu":
+            top = getattr(info, "capHeight", None)
+        elif base_cp in _SOFT_DOTTED_BASE:
+            # i/j: accent replaces the tittle, so xHeight is the real top
+            top = getattr(info, "xHeight", None) or getattr(info, "ascender", None)
+        else:
+            # Other Ll/Lt/unknown — ascender is safer than xHeight for ascenders
+            top = getattr(info, "ascender", None)
+        if top is not None:
+            above_y = top + BUFFER
+
+    if "below" in positions and below_y is None:
+        below_y = -BUFFER
+
+    return above_y, below_y
+
+
+def _flat_contour_points(glyph) -> list[tuple[float, float]]:
+    """All contour points (on-curve + off-curve) of the glyph, with
+    components decomposed via ``DecomposingRecordingPen``.
+
+    Returns a flat list of ``(x, y)`` tuples.
+    """
+    if glyph is None:
+        return []
+    try:
+        if len(glyph) > 0:
+            contours = list(glyph.contours)
+        elif glyph.components:
+            from fontParts.world import RGlyph
+            from fontTools.pens.recordingPen import DecomposingRecordingPen
+            drp = DecomposingRecordingPen(glyph.font)
+            glyph.draw(drp)
+            temp = RGlyph()
+            drp.replay(temp.getPen())
+            contours = list(temp.contours)
+        else:
+            return []
+    except Exception:
+        return []
+
+    pts: list[tuple[float, float]] = []
+    for c in contours:
+        try:
+            for p in c.points:
+                pts.append((p.x, p.y))
+        except Exception:
+            continue
+    return pts
+
+
+def _vstem_edge_y_values(
+    vstem: PSHint,
+    points: list[tuple[float, float]],
+    x_tolerance: float = 3.0,
+) -> list[float]:
+    """Y values of contour points whose X is near the vstem's edges.
+
+    Returns the Y coordinates of points lying within ``x_tolerance`` of
+    either ``vstem.position`` (left edge) or ``vstem.position+vstem.width``
+    (right edge). These points define the Y-extent of the vertical stroke
+    the vstem represents.
+    """
+    left_x = vstem.position
+    right_x = vstem.position + vstem.width
+    return [
+        y for (x, y) in points
+        if abs(x - left_x) <= x_tolerance or abs(x - right_x) <= x_tolerance
+    ]
+
+
+def _apply_accent_zone_filter(
+    vstems: list[PSHint],
+    hstems: list[PSHint],
+    glyph,
+) -> tuple[list[PSHint], list[PSHint]]:
+    """Remove h/v hints located in the glyph's accent zone.
+
+    Triggers only when Unicode NFD decomposition confirms the glyph carries
+    an above and/or below combining mark. The cut zone is taken from the
+    base glyph's actual bounding box (when the base glyph exists in the
+    UFO) or from font metrics as a fallback.
+
+    hstems
+        Direct test on Y (hstem position/end are Y coordinates).
+
+    vstems
+        For each vstem, find every contour point whose X is within ±3 units
+        of the stem's left or right edge — these points sit on the vertical
+        edges of the stroke the stem represents. If **all** such points'
+        Y values fall in the accent zone (``>= above_y`` or ``<= below_y``
+        with a small margin), the stem belongs to the accent and is dropped.
+
+        This works in three regimes:
+
+        * **Separate-contour accents** (decomposed `Adieresis` dots):
+          the dot's left/right X has only dot contour points, all above
+          capHeight → removed.
+        * **Integrated accents** (`Ccedilla`/`aogonek`: cedilla/ogonek
+          fused with the base contour): the accent's vertical edges sit
+          at X values where the base contour has no points (or has points
+          only inside the base body). All edge points are in the accent
+          zone → removed.
+        * **Base body stems** under any accent (`Iacute` I-body vstem):
+          the I-body's left/right X have points from baseline to capHeight
+          — not all in the accent zone → kept.
+    """
+    if glyph is None:
+        return vstems, hstems
+
+    positions, base_cp = _glyph_accent_info(glyph)
+    if not positions:
+        return vstems, hstems
+
+    above_y, below_y = _accent_zone_bounds(glyph, positions, base_cp)
+    if above_y is None and below_y is None:
+        return vstems, hstems
+
+    # hstems: position/end are Y. The whole stem must sit in the accent zone.
+    new_hstems: list[PSHint] = []
+    for s in hstems:
+        if above_y is not None and s.position >= above_y:
+            logger.debug(f"Drop above-accent hstem {s.raw}")
+            continue
+        if below_y is not None and s.end <= below_y:
+            logger.debug(f"Drop below-accent hstem {s.raw}")
+            continue
+        new_hstems.append(s)
+
+    # vstems: check Y of contour points on the stem's vertical edges
+    points = _flat_contour_points(glyph)
+    if not points:
+        return vstems, new_hstems
+
+    MARGIN_Y = 5.0
+    X_TOLERANCE = 3.0
+    new_vstems: list[PSHint] = []
+    for s in vstems:
+        edge_ys = _vstem_edge_y_values(s, points, X_TOLERANCE)
+        if not edge_ys:
+            new_vstems.append(s)
+            continue
+
+        in_above = (
+            above_y is not None
+            and all(y >= above_y - MARGIN_Y for y in edge_ys)
+        )
+        in_below = (
+            below_y is not None
+            and all(y <= below_y + MARGIN_Y for y in edge_ys)
+        )
+        if in_above or in_below:
+            logger.debug(f"Drop accent vstem {s.raw}")
+            continue
+        new_vstems.append(s)
+
+    return new_vstems, new_hstems
 
 
 # ── Small element filtering ──────────────────────────────────────────────────
@@ -797,11 +1136,19 @@ def _optimize_vstems(
     return vstems
 
 
-def _max_stem_width(stem_snap_v: list[float] | None, upm: int) -> float:
-    """Maximum acceptable stem width."""
-    if stem_snap_v:
-        return max(stem_snap_v) * 3.0
-    return upm * 0.3
+def _snap_tolerance(snap_value: float) -> float:
+    """Acceptable deviation from a single stemSnap value.
+
+    Tolerance scales as 20% of the snap value with a 5-unit floor so that
+    Thin masters (snap ~20) get a usable ±5 window while Black/Display
+    masters (snap 250-400) get proportionally larger ±50-80 windows.
+    """
+    return max(5.0, snap_value * 0.20)
+
+
+def _is_snap_compatible(width: float, snaps: list[float]) -> bool:
+    """True if `width` is within tolerance of at least one snap value."""
+    return any(abs(width - s) <= _snap_tolerance(s) for s in snaps)
 
 
 def _is_centric(vstems: list[PSHint], center: float) -> bool:

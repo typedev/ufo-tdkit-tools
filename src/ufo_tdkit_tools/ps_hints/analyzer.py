@@ -6,7 +6,7 @@ PostScript hints analyzer.
 
 Detects optimization opportunities in PS hint data:
 
-1. Too-wide vstems (wider than 3x max stemSnap)
+1. Snap-incompatible vstems (width not within ~20% of any stemSnap value)
 2. Overlapping vstems (same-side and cross-side/centric)
 3. Overlapping hstems
 4. Potential vstem3 candidates (3 equally-spaced similar-width vstems)
@@ -21,7 +21,7 @@ from ufo_tdkit_tools.ps_hints.parser import PSHintData
 from ufo_tdkit_tools.ps_hints.optimizer import (
     _collect_unique_stems,
     _has_mixed_widths,
-    _max_stem_width,
+    _is_snap_compatible,
     _pick_best_stem,
     _snap_distance,
     _stems_overlap,
@@ -42,7 +42,8 @@ def analyze_glyph(
     Returns list of (pattern_tag, detail_string) or None if no issues.
 
     Pattern tags:
-        too-wide-v: vstem wider than 3x max stemSnap value
+        snap-incompatible-v: vstem width not within ~20% (floor 5u) of any
+            stemSnap value
         centric-overlap: cross-side vstem overlap (narrow glyphs like i, j)
         overlap-v: same-side vstem overlap
         overlap-h: hstem overlap
@@ -60,21 +61,27 @@ def analyze_glyph(
     regular_vstems = [s for s in all_vstems if not s.is_ghost and not s.is_triple]
     regular_hstems = [s for s in all_hstems if not s.is_ghost and not s.is_triple]
 
-    # Check too-wide vstems
-    max_w = _max_stem_width(stem_snap_v, upm) if regular_vstems else 0.0
-    if regular_vstems:
+    # Check snap-incompatible vstems
+    if regular_vstems and stem_snap_v:
         for s in regular_vstems:
-            if s.width > max_w:
+            if not _is_snap_compatible(s.width, stem_snap_v):
+                nearest = min(stem_snap_v, key=lambda v: abs(s.width - v))
                 issues.append(
                     (
-                        "too-wide-v",
+                        "snap-incompatible-v",
                         f"vstem {_fmt(s.position)}+{_fmt(s.width)} "
-                        f"(w={_fmt(s.width)} > {_fmt(max_w)})",
+                        f"(w={_fmt(s.width)}, nearest snap={_fmt(nearest)})",
                     )
                 )
 
-    # Check vstem overlaps
-    non_wide = [s for s in regular_vstems if s.width <= max_w] if regular_vstems else []
+    # Check vstem overlaps (operate on the snap-compatible subset)
+    if regular_vstems and stem_snap_v:
+        non_wide = [s for s in regular_vstems if _is_snap_compatible(s.width, stem_snap_v)]
+    elif regular_vstems:
+        max_w = upm * 0.3
+        non_wide = [s for s in regular_vstems if s.width <= max_w]
+    else:
+        non_wide = []
     if len(non_wide) >= 2:
         center = glyph_width / 2.0
         left = [s for s in non_wide if (s.position + s.width / 2.0) < center]

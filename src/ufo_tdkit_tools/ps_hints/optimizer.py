@@ -444,8 +444,21 @@ def _resolve_glyph_codepoint(glyph) -> int | None:
 _ABOVE_CCC = frozenset({214, 216, 228, 230, 232, 234})
 _BELOW_CCC = frozenset({200, 202, 218, 220, 222, 233, 240})
 
+# Bar-like combining marks: their visual form *is* a horizontal stroke,
+# so any hstem they produce is a real stem worth keeping. Other above/below
+# accents (acute, grave, dieresis, cedilla, ogonek) have no meaningful
+# hstem and stay subject to the zone filter.
+_BAR_ACCENTS = frozenset({
+    0x0304,  # COMBINING MACRON
+    0x0305,  # COMBINING OVERLINE
+    0x035E,  # COMBINING DOUBLE MACRON
+    0x0331,  # COMBINING MACRON BELOW
+    0x0332,  # COMBINING LOW LINE
+    0x035F,  # COMBINING DOUBLE MACRON BELOW
+})
 
-def _glyph_accent_info(glyph) -> tuple[set[str], int | None]:
+
+def _glyph_accent_info(glyph) -> tuple[set[str], set[str], int | None]:
     """Detect accent positions via Unicode NFD decomposition.
 
     Classification uses the combining mark's canonical combining class
@@ -454,32 +467,40 @@ def _glyph_accent_info(glyph) -> tuple[set[str], int | None]:
     their Unicode name.
 
     Returns:
-        (positions, base_cp) where positions ⊆ {"above", "below"}.
-        Empty set ⇒ no accent detected (apply no zone filter).
+        (positions, bar_positions, base_cp). ``positions`` ⊆
+        {"above", "below"} is every detected accent zone. ``bar_positions``
+        ⊆ positions is the subset whose accent is a horizontal bar
+        (macron/overline/low-line); the hstem filter is bypassed in those
+        zones. Empty positions ⇒ no accent detected.
     """
     import unicodedata
 
     cp = _resolve_glyph_codepoint(glyph)
     if cp is None:
-        return set(), None
+        return set(), set(), None
     try:
         decomp = unicodedata.normalize("NFD", chr(cp))
     except (ValueError, TypeError):
-        return set(), None
+        return set(), set(), None
     if len(decomp) < 2:
-        return set(), cp
+        return set(), set(), cp
 
     base_cp = ord(decomp[0])
     positions: set[str] = set()
+    bar_positions: set[str] = set()
     for mark in decomp[1:]:
         if unicodedata.category(mark) != "Mn":
             continue
         ccc = unicodedata.combining(mark)
         if ccc in _ABOVE_CCC:
             positions.add("above")
+            if ord(mark) in _BAR_ACCENTS:
+                bar_positions.add("above")
         elif ccc in _BELOW_CCC:
             positions.add("below")
-    return positions, base_cp
+            if ord(mark) in _BAR_ACCENTS:
+                bar_positions.add("below")
+    return positions, bar_positions, base_cp
 
 
 # Soft-dotted bases (Unicode Soft_Dotted.txt): their bare glyph carries a
@@ -650,6 +671,11 @@ def _apply_accent_zone_filter(
     base glyph's actual bounding box (when the base glyph exists in the
     UFO) or from font metrics as a fallback.
 
+    Bar-shaped marks (macron/overline/low-line — see ``_BAR_ACCENTS``) are
+    themselves horizontal strokes: the hstem filter is skipped in any zone
+    whose accent is a bar so the bar's own hstem survives. The vstem filter
+    still runs unconditionally — bars produce no meaningful vstem.
+
     hstems
         Direct test on Y (hstem position/end are Y coordinates).
 
@@ -677,7 +703,7 @@ def _apply_accent_zone_filter(
     if glyph is None:
         return vstems, hstems
 
-    positions, base_cp = _glyph_accent_info(glyph)
+    positions, bar_positions, base_cp = _glyph_accent_info(glyph)
     if not positions:
         return vstems, hstems
 
@@ -686,12 +712,16 @@ def _apply_accent_zone_filter(
         return vstems, hstems
 
     # hstems: position/end are Y. The whole stem must sit in the accent zone.
+    # In zones occupied by a bar-shaped mark (macron/overline/low-line) the
+    # accent itself is a horizontal stroke — keep its hstem.
+    hstem_above_y = None if "above" in bar_positions else above_y
+    hstem_below_y = None if "below" in bar_positions else below_y
     new_hstems: list[PSHint] = []
     for s in hstems:
-        if above_y is not None and s.position >= above_y:
+        if hstem_above_y is not None and s.position >= hstem_above_y:
             logger.debug(f"Drop above-accent hstem {s.raw}")
             continue
-        if below_y is not None and s.end <= below_y:
+        if hstem_below_y is not None and s.end <= hstem_below_y:
             logger.debug(f"Drop below-accent hstem {s.raw}")
             continue
         new_hstems.append(s)

@@ -122,6 +122,10 @@ def convert_binary_to_ufo(
 
         dest_font = defcon.Font()
         _run_extractor(str(binary_path), dest_font, warnings)
+        # Restore OS/2 fsSelection bits ufo-extractor drops (USE_TYPO_METRICS,
+        # WWS, OBLIQUE) before the UFO hits disk -- the autohint path in the
+        # pipeline reloads from disk, so an in-memory fix after open would be lost.
+        _preserve_os2_selection(tt_font, dest_font)
         # Save to disk so fontParts can open it
         dest_font.save(temp_ufo_path)
     except Exception as e:
@@ -155,9 +159,7 @@ def convert_binary_to_ufo(
                 verify_font_level_hints,
             )
 
-            hint_count, hint_warnings = extract_cff_hints(
-                tt_font, ufo_font, progress_callback
-            )
+            hint_count, hint_warnings = extract_cff_hints(tt_font, ufo_font, progress_callback)
             warnings.extend(hint_warnings)
 
             # Verify font-level hint data
@@ -238,8 +240,7 @@ def _run_extractor(
         )
     except ImportError:
         raise RuntimeError(
-            "ufo-extractor is not installed. "
-            "Install with: uv pip install ufo-extractor"
+            "ufo-extractor is not installed. Install with: uv pip install ufo-extractor"
         )
 
 
@@ -568,11 +569,7 @@ def _unify_feature_blocks(fea_text: str) -> str:
                 coverage |= declared
             else:
                 coverage.add((sl[0] or "DFLT", sl[1] or "dflt"))
-        if (
-            len(unique_lists) == 1
-            and declared
-            and coverage >= declared
-        ):
+        if len(unique_lists) == 1 and declared and coverage >= declared:
             items = sl_items[sl_order[0]]
             body_lines = [f"    {it}" for it in items]
             unified[tag] = f"feature {tag} {{\n" + "\n".join(body_lines) + f"\n}} {tag};"
@@ -599,7 +596,7 @@ def _unify_feature_blocks(fea_text: str) -> str:
     parts_out: list[str] = []
     last_end = 0
     for b in blocks:
-        parts_out.append(fea_text[last_end:b["start"]])
+        parts_out.append(fea_text[last_end : b["start"]])
         if b["tag"] not in seen_tags:
             seen_tags.add(b["tag"])
             parts_out.append(unified[b["tag"]])
@@ -639,11 +636,7 @@ def _inline_aalt_lookups(fea_text: str) -> str:
     for m in lookup_re.finditer(fea_text):
         name = m.group(1)
         body = m.group(2)
-        subs = [
-            line.strip()
-            for line in body.splitlines()
-            if sub_re.match(line)
-        ]
+        subs = [line.strip() for line in body.splitlines() if sub_re.match(line)]
         if subs:
             lookup_subs[name] = subs
 
@@ -706,6 +699,30 @@ def _strip_empty_gdef(fea_text: str) -> str:
         re.DOTALL,
     )
     return pattern.sub("", fea_text)
+
+
+# UFO spec: openTypeOS2Selection must not contain bits 0 (ITALIC), 5 (BOLD),
+# or 6 (REGULAR) -- those are derived from styleMapStyleName/italicAngle at
+# compile time. The remaining meaningful bits are 1 (UNDERSCORE), 2 (NEGATIVE),
+# 3 (OUTLINED), 4 (STRIKEOUT), 7 (USE_TYPO_METRICS), 8 (WWS), 9 (OBLIQUE).
+_OS2_SELECTION_BITS = frozenset({1, 2, 3, 4, 7, 8, 9})
+
+
+def _preserve_os2_selection(tt_font: Any, ufo_font: Any) -> None:
+    """Restore ``openTypeOS2Selection`` bits that ufo-extractor discards.
+
+    ufo-extractor (through 0.8.1) keeps only fsSelection bits 1--4 and silently
+    drops bits 7 (``USE_TYPO_METRICS``), 8 (``WWS``) and 9 (``OBLIQUE``), all of
+    which are valid UFO ``openTypeOS2Selection`` bits. Without these, a font's
+    "Use Typo Metrics" preference is lost on every binary -> UFO -> OTF round
+    trip. Re-read fsSelection straight from the source OS/2 table and rebuild the
+    list with the full set of spec-permitted bits.
+    """
+    if "OS/2" not in tt_font:
+        return
+    fs_selection = tt_font["OS/2"].fsSelection
+    bits = [b for b in range(16) if (fs_selection & (1 << b)) and b in _OS2_SELECTION_BITS]
+    ufo_font.info.openTypeOS2Selection = bits
 
 
 def _validate_font_info(ufo_font, warnings: list[ConversionWarning]) -> None:

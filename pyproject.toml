@@ -53,6 +53,9 @@ dev = [
     "ruff>=0.1",
 ]
 
+[project.scripts]
+ufo-tdkit-tools = "ufo_tdkit_tools.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/typedev/ufo-tdkit-tools"
 Repository = "https://github.com/typedev/ufo-tdkit-tools"

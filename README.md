@@ -44,9 +44,38 @@ For the lower-level entry points (`extraction.convert_binary_to_ufo`,
 `compilation.compile_otf_preserve_optimized`, the `ps_hints` parser /
 optimizer / validator / batch wrappers), see [`docs/API.md`](docs/API.md).
 
+## Command line
+
+Installing the package (`uv sync` / `pip install`) provides the
+`ufo-tdkit-tools` console script (also runnable as
+`python -m ufo_tdkit_tools`). It wraps `process_font` for batch builds:
+
+```bash
+# Re-hint/optimize a batch of OTFs in place (temp UFO created & discarded)
+ufo-tdkit-tools optimize-otf --in-place *.otf
+
+# Or write fresh <stem>.otf + <stem>.ufo pairs into a directory
+ufo-tdkit-tools optimize-otf -o build/ Sans-Regular.otf Sans-Bold.otf
+
+# Skip the ps_hints optimizer (autohint + compile only)
+ufo-tdkit-tools optimize-otf --in-place --no-optimize *.otf
+```
+
+Every run prints one machine-parseable summary line and exits non-zero if
+any input failed — convenient inside a build log:
+
+```
+optimized=36 autohinted=0 failed=0
+```
+
+`--in-place` only rewrites `.otf` inputs (atomically, so a mid-pipeline
+failure never corrupts the source). UFO and other binary inputs use `-o DIR`.
+
 ## Round-trip fidelity
 
 OTF → UFO → OTF preserves declared `hstem`/`vstem` positions and widths byte-for-byte, hint substitution between drawing operations, counter-mask grouping, and font-level Private dict scalars. The one structural exception is hint substitution that fires *between* subpaths (a `hintmask` immediately before a `moveto`, common on disconnected glyphs like `i`, `j`, dieresis-bearing letters): the `autohint.v2` format has no anchor for these and AFDKO's own autohint produces the same flattening.
+
+Metadata (OS/2, `head`, `name`) also round-trips: `fsType`, weight/width class, vendor ID, Unicode/code-page ranges, PANOSE, typo/win/hhea metrics, sub/superscript and strikeout, `head.macStyle`/`head.flags`, and all name records. The `OS/2.fsSelection` flags `USE_TYPO_METRICS` (bit 7), `WWS` (bit 8) and `OBLIQUE` (bit 9) are restored during extraction — `ufo-extractor` (≤ 0.8.1) drops them, so they are re-read straight from the source `OS/2` table.
 
 ## License
 

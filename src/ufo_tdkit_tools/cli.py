@@ -173,7 +173,10 @@ def _process_one(
     source file.
     """
     if in_place:
-        with tempfile.TemporaryDirectory(prefix="ufo_tdkit_cli_") as tmp:
+        # Build on the same filesystem as the source: os.replace() below is only
+        # atomic within one device, and a default /tmp tempdir may live on a
+        # different filesystem (EXDEV: Invalid cross-device link).
+        with tempfile.TemporaryDirectory(prefix=".ufo_tdkit_cli_", dir=src.parent) as tmp:
             tmp_otf = Path(tmp) / "out.otf"
             tmp_ufo = Path(tmp) / "out.ufo"
             result = process_font(

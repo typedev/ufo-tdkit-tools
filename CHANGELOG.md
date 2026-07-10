@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Preserve mode could fail to compile UFOs with features (platform-dependent).** `_compile_makeotf_hinted` passed the UFO's `features.fea` to the donor compile via `-ff`; on some platforms `makeotfexe` aborts with `std::system_error` whenever `-ff` is present — even for an empty file (reproduced deterministically on Fedora 44 / AFDKO 4.0.3, and reported intermittently under parallel load on AFDKO 5.0.0; not reproduced on 5.0.0 here across ~250 serial and oversubscribed-parallel invocations). When the abort fires, `_compile_makeotf_hinted` returns `False`, so `compile_otf_preserve_optimized` returns `False` and `process_font` reports `success=False` / `"OTF compilation failed"` — a hard failure, not a silent unhinted output. (A caller that catches that `False` and falls back to a plain ufo2ft compile is what turns it into silently unhinted output downstream.) The donor font exists only as a source of hinted charstrings and PrivateDict hint parameters — its GSUB/GPOS are discarded by the per-glyph merge — so the donor is now compiled with **no features file at all** (wrapper auto-discovery is moot: the tx-emitted `.ps` sits alone in a temp directory). Output features are unaffected: they come from the ufo2ft shell. Removing `-ff` also skips donor feature compilation that the merge discards anyway (~4% of the makeotf step on a 600-glyph / 42 KB feature file here). New e2e regression test compiles a hinted UFO **with** features and asserts the hints actually reach the output CFF (`test_hints_survive_with_features_present`).
+
 ### Added
 
 - **Multi-entry `hintSetList` extraction.** `cff_hints.py` now parses CFF charstrings via `afdko.otfautohint.otfFont.convertT2ToGlyphData` and emits one `autohint.v2` hint set per `hintmask` event in the source, anchored on the canonical UFO point per AFDKO's `addUfoHints` algorithm. Hint substitution is preserved through OTF → UFO → OTF on glyphs whose substitution points lie inside contours.

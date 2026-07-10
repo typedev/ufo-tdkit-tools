@@ -33,8 +33,13 @@ from ufo_tdkit_tools.pipeline import process_font  # noqa: E402
 # ── UFO factory ───────────────────────────────────────────────────────────────
 
 
-def _build_minimal_ufo(ufo_path, *, with_hints=True):
-    """Build a tiny UFO with one rectangle glyph; optional v-stem/h-stem hint."""
+def _build_minimal_ufo(ufo_path, *, with_hints=True, with_features=False):
+    """Build a tiny UFO with one rectangle glyph; optional v-stem/h-stem hint.
+
+    With ``with_features=True`` the UFO also gets an ``A.alt`` glyph and an
+    ``ss01`` feature — real-world UFOs virtually always carry features, and
+    the donor-compile step must stay hint-preserving in their presence.
+    """
     import defcon
 
     font = defcon.Font()
@@ -87,7 +92,30 @@ def _build_minimal_ufo(ufo_path, *, with_hints=True):
             ],
         }
 
+    if with_features:
+        alt = font.newGlyph("A.alt")
+        alt.width = 600
+        alt_pen = alt.getPen()
+        alt_pen.moveTo((100, 0))
+        alt_pen.lineTo((500, 0))
+        alt_pen.lineTo((500, 650))
+        alt_pen.lineTo((100, 650))
+        alt_pen.closePath()
+        font.features.text = "feature ss01 {\n    sub A by A.alt;\n} ss01;\n"
+
     font.save(str(ufo_path))
+
+
+def _hint_ops(otf_path, glyph_name):
+    """Return the hint operators present in a glyph's CFF charstring."""
+    hint_op_names = {"hstem", "vstem", "hstemhm", "vstemhm", "hintmask", "cntrmask"}
+    tt = TTFont(str(otf_path))
+    charstrings = tt["CFF "].cff.topDictIndex[0].CharStrings
+    charstring = charstrings[glyph_name]
+    charstring.decompile()
+    ops = [op for op in charstring.program if isinstance(op, str) and op in hint_op_names]
+    tt.close()
+    return ops
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -112,6 +140,38 @@ class TestPipelineEndToEnd:
         tt = TTFont(str(otf_out))
         assert "CFF " in tt
         assert "A" in tt.getGlyphOrder()
+        tt.close()
+
+    def test_hints_survive_with_features_present(self, tmp_path):
+        """Regression: a UFO WITH a features.fea must still get its authored
+        hints into the output CFF.
+
+        The makeotf donor compile used to receive the UFO's features via
+        ``-ff``; on some platforms makeotfexe aborts (std::system_error) while
+        compiling features from tx-emitted Type 1 input, which made the donor
+        compile return False and preserve compilation fail outright. The donor
+        is now compiled with NO features file at all (its GSUB/GPOS are
+        discarded by the merge anyway), so authored hints must survive — and
+        the shell, which does own the features, must still carry GSUB.
+        """
+        from ufo_tdkit_tools.compilation import compile_otf_preserve_optimized
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in, with_features=True)
+
+        stats = {}
+        ok = compile_otf_preserve_optimized(str(ufo_in), str(otf_out), stats=stats)
+
+        assert ok, "preserve compilation failed"
+        assert stats.get("hints_transferred", 0) >= 1, (
+            "no hinted charstrings transferred — donor compile silently failed"
+        )
+        ops = _hint_ops(otf_out, "A")
+        assert ops, "authored hints missing from output charstring"
+
+        tt = TTFont(str(otf_out))
+        assert "GSUB" in tt, "shell features (ss01) missing from output"
         tt.close()
 
     def test_auto_source_picks_v2(self, tmp_path):

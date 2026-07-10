@@ -139,7 +139,6 @@ def _compile_makeotf_hinted(
         if arg in ("-nS", "-shw"):
             extra_flags.append(arg)
 
-    fea_path = os.path.join(ufo_path, "features.fea")
     t1_path = output_path.replace(".otf", ".ps")
     try:
         # Step 1: Convert UFO to Type 1 using tx
@@ -156,12 +155,17 @@ def _compile_makeotf_hinted(
                     logger.error(f"tx stderr: {tx_result.stderr.strip()}")
             return False
 
-        # Step 2: Compile with makeotf wrapper. Pass features.fea explicitly:
-        # the tx-emitted .ps file lives in a temp dir, so makeotf's default
-        # search for a features file adjacent to the input would not find it.
+        # Step 2: Compile with makeotf wrapper. The donor OTF exists ONLY as a
+        # source of hinted charstrings and PrivateDict hint parameters (see the
+        # per-glyph merge in compile_otf_preserve_optimized) — its GSUB/GPOS
+        # are discarded, so it is compiled WITHOUT any features file. Do NOT
+        # pass -ff here: on some platforms makeotfexe aborts with
+        # std::system_error whenever -ff is present (even for an empty file),
+        # which silently downgrades preserve mode to unhinted shell output.
+        # Wrapper feature auto-discovery is not a concern either: makeotf
+        # searches next to the INPUT font, and the tx-emitted .ps sits alone
+        # in a temp directory. Output features come from the ufo2ft shell.
         cmd = [makeotf_bin, "-f", t1_path, "-o", output_path]
-        if os.path.exists(fea_path):
-            cmd += ["-ff", fea_path]
         cmd += extra_flags
         mko_result = _sp.run(cmd, capture_output=True, text=True, timeout=180, env=env)
         if mko_result.returncode != 0:

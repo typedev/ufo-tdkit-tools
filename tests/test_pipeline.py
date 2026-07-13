@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from ufo_tdkit_tools.pipeline import ProcessResult, _resolve_source, process_font
 from ufo_tdkit_tools.ps_hints.parser import HintSource
@@ -134,3 +135,43 @@ class TestProcessFontDispatch:
         )
         assert result.success is False
         assert "unsupported" in result.error.lower()
+
+    def test_forwards_tool_paths_to_compiler(self, tmp_path, monkeypatch):
+        """tx_path/makeotf_path reach compile_otf_preserve_optimized so that
+        ProcessPoolExecutor workers (no AFDKO on PATH) can compile."""
+        import ufo_tdkit_tools.compilation.compiler as compiler
+        import ufo_tdkit_tools.pipeline as pipeline
+        import ufo_tdkit_tools.ps_hints.batch as batch
+
+        ufo_in = tmp_path / "in.ufo"
+        ufo_in.mkdir()
+
+        fake = _FakeFont(glyphs=[_FakeGlyph("A")])
+        fake.save = lambda path: Path(path).mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(pipeline, "_load_input", lambda *a, **k: (fake, None))
+        monkeypatch.setattr(batch, "detect_font_source", lambda font: HintSource.AUTOHINT_V2)
+        monkeypatch.setattr(batch, "count_glyphs_with_source", lambda font, src: 1)
+
+        captured = {}
+
+        def _fake_compile(ufo, otf, logger=None, tx_path=None, makeotf_path=None, **kw):
+            captured["tx_path"] = tx_path
+            captured["makeotf_path"] = makeotf_path
+            Path(otf).write_bytes(b"OTF")
+            return True
+
+        monkeypatch.setattr(compiler, "compile_otf_preserve_optimized", _fake_compile)
+
+        result = process_font(
+            ufo_in,
+            tmp_path / "out.otf",
+            tmp_path / "out.ufo",
+            hint_source="auto",
+            optimize=False,
+            tx_path="/opt/afdko/tx",
+            makeotf_path="/opt/afdko/makeotf",
+        )
+
+        assert result.success is True
+        assert captured == {"tx_path": "/opt/afdko/tx", "makeotf_path": "/opt/afdko/makeotf"}

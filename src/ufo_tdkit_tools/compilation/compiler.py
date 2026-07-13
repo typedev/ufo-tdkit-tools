@@ -64,8 +64,19 @@ def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
             # so subroutinization here would only create dangling subrs in the CFF table.
             otf = compileOTF(ufo, optimizeCFF=1)
         except Exception as e:
+            # LAST-RESORT fallback: produce *some* OTF rather than fail the build.
+            # This DROPS the entire feature set (GSUB + explicit GPOS features),
+            # so it must never pass silently — the usual trigger is an unresolved
+            # feature include() after the UFO was relocated to a temp dir. Escalate
+            # loudly so the layout loss is visible in the log, not discovered later
+            # in the shipped binary.
             if logger:
-                logger.warning(f"Feature compilation failed ({e}), retrying without features")
+                logger.error(
+                    f"Feature compilation FAILED ({e}); recompiling WITHOUT features "
+                    f"as a last resort — the resulting OTF will have NO GSUB and only "
+                    f"auto-generated GPOS. Check for unresolved include() paths in "
+                    f"{ufo_path}."
+                )
             ufo = Font(ufo_path)
             ufo.features.text = ""
             otf = compileOTF(ufo, optimizeCFF=1)

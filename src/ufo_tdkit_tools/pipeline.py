@@ -47,6 +47,8 @@ def process_font(
     *,
     hint_source: HintSourceArg = "auto",
     optimize: bool = False,
+    tx_path: str | None = None,
+    makeotf_path: str | None = None,
     logger_: logging.Logger | None = None,
 ) -> ProcessResult:
     """Convert any input (binary or UFO) to a hinted OTF + UFO pair.
@@ -83,6 +85,11 @@ def process_font(
         output_ufo: Path for the output UFO.
         hint_source: Source selection for UFO inputs (ignored for binary).
         optimize: Run the ps_hints optimizer before compilation.
+        tx_path: Absolute path to the ``tx`` binary, forwarded to the
+            preserve-optimized compiler. Needed when the caller runs in a
+            subprocess whose PATH lacks AFDKO (e.g. a ProcessPoolExecutor
+            worker). Falls back to PATH lookup when None.
+        makeotf_path: Absolute path to the ``makeotf`` binary, same rationale.
         logger_: Optional logger; defaults to module logger.
 
     Returns:
@@ -190,6 +197,8 @@ def process_font(
             str(output_ufo),
             str(output_otf),
             logger=log,
+            tx_path=tx_path,
+            makeotf_path=makeotf_path,
         )
         if not ok:
             return ProcessResult(

@@ -6,7 +6,7 @@ PS hints extraction, optimization, and preserve-mode compilation for UFO fonts.
 
 - **extraction** -- Convert binary fonts (OTF/TTF/WOFF/WOFF2) to UFO with full PS hint preservation (multi-entry `hintSetList`, counter triplets `hstem3`/`vstem3`, font-level Private dict including `StdHW`/`StdVW`) and FEA post-processing (one feature block per tag, inlined `aalt` for spec compliance).
 - **ps_hints** -- Parse, optimize, analyze, and validate PostScript hints in UFO fonts; move hints between processedglyphs / glyph lib / default layers.
-- **compilation** -- Compile UFO back to OTF preserving PS hints (via AFDKO `makeotf` + per-glyph charstring merge + `cffsubr` subroutinization). Parallel batch via `ProcessPoolExecutor`.
+- **compilation** -- Compile UFO back to OTF preserving PS hints (via AFDKO `makeotf` + per-glyph charstring merge, then production glyph names + `cffsubr` subroutinization). Parallel batch via `ProcessPoolExecutor`.
 
 ## Installation
 

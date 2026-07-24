@@ -5,11 +5,15 @@
 UFO to OTF compilation with PS hint preservation.
 
 Hybrid strategy for preserving PostScript hints during UFO -> OTF compilation:
-1. Compile with ufo2ft (correct metadata, no subroutinization)
+1. Compile with ufo2ft (correct metadata, no subroutinization, SOURCE glyph names)
 2. Compile with tx + makeotf (hints from glyph.lib, no subroutinization)
 3. Per-glyph charstring merge (hinted charstrings into shell CFF)
 4. Transfer PrivateDict hint parameters
-5. Apply cffsubr subroutinization (~38% size reduction, hints in subrs)
+5. Rename to production names + subroutinize via ufo2ft's PostProcessor
+
+Both compiles must share one glyph namespace for step 3 to match anything, so
+the shell is built with ``useProductionNames=False`` and renaming is deferred
+to step 5 -- see :func:`_finalize_shell`.
 
 Extracted from TDKit (src/tdkit/compilers/otf_ttf.py).
 """
@@ -43,6 +47,13 @@ def is_preserve_mode(pshinter):
 def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
     """Compile UFO to OTF using ufo2ft (correct metadata tables, no PS hints).
 
+    Glyphs keep their SOURCE names: ``useProductionNames=False``. The hinted
+    donor built by ``tx -t1`` + ``makeotf`` ignores ``public.postscriptNames``
+    and always uses source names, so renaming the shell here would leave the
+    per-glyph merge with two disjoint namespaces and silently drop the hints of
+    every renamed glyph. Production names are applied after the merge by
+    :func:`_finalize_shell`, exactly as a plain ``compileOTF`` would.
+
     Handles feature compilation errors by retrying with empty features.
 
     Args:
@@ -51,7 +62,9 @@ def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
         logger: Optional logger
 
     Returns:
-        True on success, False on failure
+        The :class:`defcon.Font` the shell was built from (truthy) on success,
+        ``None`` on failure. The font is needed later to reproduce ufo2ft's
+        production-name mapping.
     """
     from defcon import Font
     from ufo2ft import compileOTF
@@ -62,7 +75,7 @@ def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
             # optimizeCFF=1: specialize charstrings but skip subroutinization.
             # The shell's charstrings will be replaced by hinted versions from makeotf,
             # so subroutinization here would only create dangling subrs in the CFF table.
-            otf = compileOTF(ufo, optimizeCFF=1)
+            otf = compileOTF(ufo, optimizeCFF=1, useProductionNames=False)
         except Exception as e:
             # LAST-RESORT fallback: produce *some* OTF rather than fail the build.
             # This DROPS the entire feature set (GSUB + explicit GPOS features),
@@ -79,14 +92,14 @@ def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
                 )
             ufo = Font(ufo_path)
             ufo.features.text = ""
-            otf = compileOTF(ufo, optimizeCFF=1)
+            otf = compileOTF(ufo, optimizeCFF=1, useProductionNames=False)
         otf.save(output_path)
-        return True
+        return ufo
     except Exception as e:
         if logger:
             logger.error(f"ufo2ft compilation failed: {e}")
         traceback.print_exc()
-        return False
+        return None
 
 
 def _compile_makeotf_hinted(
@@ -441,6 +454,128 @@ def prepare_processedglyphs(ufo_path, logger=None):
 # ── Preserve compilation ────────────────────────────────────────────────────
 
 
+# Charstring operators that carry PS hints.
+HINT_OPS = frozenset({"hstem", "vstem", "hstemhm", "vstemhm", "hintmask", "cntrmask"})
+
+# Stack-clearing operators that carry a leading width operand exactly when
+# their argument count is odd. (The stem/mask operators take pairs of
+# coordinates, so an odd count means one extra leading value: the width.)
+_WIDTH_ODD_ARG_OPS = HINT_OPS
+
+# Warn when the two compiles agree on less than this share of the shell's glyphs.
+_NAME_COVERAGE_WARN_RATIO = 0.95
+
+
+def _split_width_prefix(program):
+    """Split a Type 2 charstring program into ``(width_prefix, body)``.
+
+    A charstring may start with a single width operand, encoded as
+    ``width - Private.nominalWidthX`` and present only when the glyph's width
+    differs from ``Private.defaultWidthX``. Its presence is deduced from the
+    argument count of the first stack-clearing operator (Type 2 spec, "Width").
+
+    The donor and the shell have their own Private dicts, so a donor program
+    must never keep its own width prefix when moved into the shell -- the same
+    operand would decode against a different ``nominalWidthX``. Callers splice
+    the shell's own prefix onto the donor's body instead.
+
+    Args:
+        program: Decompiled charstring program (list of numbers and operators).
+
+    Returns:
+        ``(width_prefix, body)`` where ``width_prefix`` is a one-element list
+        or ``[]``, and their concatenation is the original program.
+    """
+    nargs = 0
+    for token in program:
+        if not isinstance(token, str):
+            nargs += 1
+            continue
+        if token in _WIDTH_ODD_ARG_OPS:
+            has_width = nargs % 2 == 1
+        elif token == "rmoveto":
+            has_width = nargs > 2
+        elif token in ("hmoveto", "vmoveto"):
+            has_width = nargs > 1
+        elif token == "endchar":
+            # 0 args: plain; 4: seac-like; 1 / 5: the extra leading arg is the width.
+            has_width = nargs in (1, 5)
+        else:
+            # Not a stack-clearing operator that can carry a width (e.g. a
+            # charstring opening with 'callsubr'): leave the program alone.
+            has_width = False
+        if has_width:
+            return list(program[:1]), list(program[1:])
+        return [], list(program)
+    return [], list(program)
+
+
+def _finalize_shell(shell, ufo, otf_path, subroutinize, logger=None):
+    """Apply production glyph names (and optionally subroutinize), then save.
+
+    The shell was compiled with ``useProductionNames=False`` so that the
+    per-glyph merge could match the donor's source names. Renaming is done here
+    through ufo2ft's own :class:`~ufo2ft.postProcessor.PostProcessor`, which is
+    the very code a plain ``compileOTF`` would have run: it honours
+    ``public.postscriptNames``, derives ``uniXXXX`` names when the lib key is
+    absent but renaming is requested, uniquifies collisions and strips invalid
+    characters. Reimplementing any of that here would drift from ufo2ft.
+
+    Args:
+        shell: :class:`TTFont` holding the merged CFF.
+        ufo: :class:`defcon.Font` the shell was compiled from.
+        otf_path: Destination path.
+        subroutinize: Run cffsubr on the CFF table.
+        logger: Optional logger.
+
+    Returns:
+        True if the output file exists afterwards.
+    """
+    try:
+        from ufo2ft.postProcessor import PostProcessor
+
+        # useProductionNames=None: reproduce compileOTF's default decision from
+        # the UFO lib (public.postscriptNames / useProductionNames / keepGlyphNames).
+        shell = PostProcessor(shell, ufo).process(
+            useProductionNames=None, optimizeCFF=subroutinize
+        )
+    except Exception as e:
+        # Never lose the font over a post-processing hiccup: fall back to the
+        # documented lib mapping plus a direct cffsubr call.
+        if logger:
+            logger.warning(
+                f"ufo2ft PostProcessor unavailable or failed ({e}); falling back to "
+                "public.postscriptNames renaming"
+            )
+        _rename_glyphs_fallback(shell, ufo, logger)
+        if subroutinize:
+            import cffsubr
+
+            cffsubr.subroutinize(shell)
+
+    shell.save(otf_path)
+    shell.close()
+    return os.path.exists(otf_path)
+
+
+def _rename_glyphs_fallback(shell, ufo, logger=None):
+    """Rename shell glyphs from ``public.postscriptNames`` (PostProcessor fallback)."""
+    rename_map = ufo.lib.get("public.postscriptNames")
+    if not rename_map:
+        return
+    rename_map = {src: dst for src, dst in rename_map.items() if src != dst}
+    if not rename_map:
+        return
+    shell.setGlyphOrder([rename_map.get(n, n) for n in shell.getGlyphOrder()])
+    cff = shell["CFF "].cff.topDictIndex[0]
+    cff.CharStrings.charStrings = {
+        rename_map.get(n, n): v for n, v in cff.CharStrings.charStrings.items()
+    }
+    cff.charset = [rename_map.get(n, n) for n in cff.charset]
+    if logger:
+        logger.info(f"Renamed {len(rename_map)} glyphs to production names (fallback)")
+
+
 def compile_otf_preserve(
     ufo_path, otf_path, logger=None, pshash_rebuild=False,
     tx_path=None, makeotf_path=None
@@ -478,11 +613,15 @@ def compile_otf_preserve_optimized(
     """Compile OTF preserving PS hints using per-glyph charstring merge.
 
     Hybrid strategy:
-    1. Compile with ufo2ft (optimizeCFF=1) -> shell OTF (correct metadata, no subrs)
+    1. Compile with ufo2ft (optimizeCFF=1, source glyph names) -> shell OTF
     2. Compile with tx -t1 + makeotf -nS -> hinted OTF (hints from glyph.lib)
     3. Copy individual hinted charstrings per-glyph into shell's CFF
     4. Copy PrivateDict hint parameters (BlueValues, StemSnaps, etc.)
-    5. Apply cffsubr subroutinization (~38% size reduction, hints preserved in subrs)
+    5. Apply production glyph names + cffsubr subroutinization (~38% size
+       reduction, hints preserved in subrs)
+
+    Both compiles keep the UFO's source glyph names, so the merge in step 3
+    matches every glyph; production names are applied only in step 5.
 
     Args:
         ufo_path: Path to UFO source with com.adobe.type.autohint.v2 hints
@@ -492,14 +631,12 @@ def compile_otf_preserve_optimized(
         tx_path: Absolute path to tx binary (for parallel workers)
         makeotf_path: Absolute path to makeotf binary (for parallel workers)
         stats: Optional mutable dict, filled with
-               {'hints_transferred': int, 'total_glyphs': int}
+               {'hints_transferred': int, 'total_glyphs': int,
+                'donor_hinted': int, 'name_mismatch': int}
 
     Returns:
         True on success, False on failure
     """
-    HINT_OPS = frozenset(
-        {"hstem", "vstem", "hstemhm", "vstemhm", "hintmask", "cntrmask"}
-    )
     PRIVATE_HINT_ATTRS = [
         "BlueValues", "OtherBlues", "FamilyBlues", "FamilyOtherBlues",
         "BlueScale", "BlueShift", "BlueFuzz",
@@ -514,7 +651,8 @@ def compile_otf_preserve_optimized(
         # Step 1: Compile ufo2ft shell
         if logger:
             logger.info("Preserve-optimized: compiling ufo2ft shell")
-        if not _compile_ufo2ft_shell(ufo_path, shell_path, logger):
+        shell_ufo = _compile_ufo2ft_shell(ufo_path, shell_path, logger)
+        if shell_ufo is None:
             return False
 
         # Step 1.5: Validate hint data
@@ -568,8 +706,23 @@ def compile_otf_preserve_optimized(
         shell_cs = shell_td.CharStrings
         hinted_cs = hinted_td.CharStrings
 
+        shell_names = list(shell_cs.keys())
+        missing = [name for name in shell_names if name not in hinted_cs]
+        if missing and shell_names and logger:
+            # A large gap means the two compiles disagree on glyph names, which
+            # costs every unmatched glyph its hints without failing the build.
+            coverage = 1.0 - len(missing) / len(shell_names)
+            log_at = logger.warning if coverage < _NAME_COVERAGE_WARN_RATIO else logger.info
+            log_at(
+                f"Preserve-optimized: {len(missing)}/{len(shell_names)} shell glyphs "
+                f"have no counterpart in the makeotf donor "
+                f"({coverage:.1%} name coverage); their hints cannot be merged. "
+                f"Sample: {missing[:10]}"
+            )
+
         transferred = 0
-        for glyph_name in shell_cs.keys():
+        donor_hinted = 0
+        for glyph_name in shell_names:
             if glyph_name not in hinted_cs:
                 continue
             hinted_charstring = hinted_cs[glyph_name]
@@ -579,9 +732,16 @@ def compile_otf_preserve_optimized(
                 for op in hinted_charstring.program
             )
             if has_hints:
+                donor_hinted += 1
                 shell_charstring = shell_cs[glyph_name]
                 shell_charstring.decompile()
-                shell_charstring.program = hinted_charstring.program
+                # Keep the SHELL's width operand: the donor encodes its width
+                # against its own Private.nominalWidthX / defaultWidthX, which
+                # the merge does not carry over, so reusing the donor's prefix
+                # would decode to a bogus advance width in the output CFF.
+                shell_width, _ = _split_width_prefix(shell_charstring.program)
+                _, hinted_body = _split_width_prefix(hinted_charstring.program)
+                shell_charstring.program = shell_width + hinted_body
                 transferred += 1
 
         # Step 4: Transfer PrivateDict hint parameters
@@ -592,15 +752,37 @@ def compile_otf_preserve_optimized(
             if hinted_val is not None:
                 setattr(shell_private, attr, hinted_val)
 
+        # Hinted donor glyphs the shell does not know about — the mirror image
+        # of the name-coverage warning above, and the symptom of a namespace
+        # mismatch that would otherwise pass as "this font has few hints".
+        dropped = 0
+        for glyph_name in hinted_cs.keys():
+            if glyph_name in shell_cs:
+                continue
+            charstring = hinted_cs[glyph_name]
+            charstring.decompile()
+            if any(
+                isinstance(op, str) and op in HINT_OPS for op in charstring.program
+            ):
+                dropped += 1
+        if dropped and logger:
+            logger.warning(
+                f"Preserve-optimized: {dropped} hinted donor glyph(s) have no shell "
+                "counterpart and were dropped"
+            )
+
         hinted.close()
 
         if stats is not None:
             stats["hints_transferred"] = transferred
-            stats["total_glyphs"] = len(shell_cs.keys())
+            stats["total_glyphs"] = len(shell_names)
+            stats["donor_hinted"] = donor_hinted + dropped
+            stats["name_mismatch"] = len(missing)
 
         if logger:
             logger.info(
-                f"Preserve-optimized: transferred {transferred} hinted charstrings"
+                f"Preserve-optimized: transferred {transferred} hinted charstrings "
+                f"({transferred}/{len(shell_names)} glyphs)"
             )
 
         if transferred == 0:
@@ -609,25 +791,25 @@ def compile_otf_preserve_optimized(
                     "No hinted glyphs found in UFO -- preserve mode has nothing to preserve. "
                     "Using standard ufo2ft compilation instead."
                 )
-            # Shell OTF is already a valid unhinted font -- just save it directly
-            shell.save(otf_path)
-            shell.close()
-            return os.path.exists(otf_path)
+            # Shell OTF is already a valid unhinted font -- it still needs its
+            # production glyph names, which were deferred for the merge.
+            return _finalize_shell(
+                shell, shell_ufo, otf_path, subroutinize=False, logger=logger
+            )
 
-        # Step 5: Subroutinize with cffsubr for ~38% smaller CFF
-        # Hints are preserved inside subroutines (callsubr/callgsubr).
-        import cffsubr
-
+        # Step 5: Production glyph names + cffsubr subroutinization for ~38%
+        # smaller CFF. Hints are preserved inside subroutines (callsubr/callgsubr).
         if logger:
-            logger.info("Preserve-optimized: applying cffsubr subroutinization")
-        cffsubr.subroutinize(shell)
+            logger.info(
+                "Preserve-optimized: applying production names and subroutinization"
+            )
+        saved = _finalize_shell(
+            shell, shell_ufo, otf_path, subroutinize=True, logger=logger
+        )
 
-        shell.save(otf_path)
-        shell.close()
-
-        if logger:
+        if logger and saved:
             logger.info(f"Preserve-optimized: saved hybrid OTF: {otf_path}")
-        return os.path.exists(otf_path)
+        return saved
 
     except Exception as e:
         if logger:

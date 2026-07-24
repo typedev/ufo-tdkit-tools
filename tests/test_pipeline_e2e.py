@@ -33,12 +33,19 @@ from ufo_tdkit_tools.pipeline import process_font  # noqa: E402
 # ── UFO factory ───────────────────────────────────────────────────────────────
 
 
-def _build_minimal_ufo(ufo_path, *, with_hints=True, with_features=False):
+def _build_minimal_ufo(
+    ufo_path, *, with_hints=True, with_features=False, with_production_names=False
+):
     """Build a tiny UFO with one rectangle glyph; optional v-stem/h-stem hint.
 
     With ``with_features=True`` the UFO also gets an ``A.alt`` glyph and an
     ``ss01`` feature — real-world UFOs virtually always carry features, and
     the donor-compile step must stay hint-preserving in their presence.
+
+    With ``with_production_names=True`` the UFO also gets an ``Amacron`` glyph
+    and a ``public.postscriptNames`` mapping renaming it to ``uni0100`` — the
+    setup that used to make the shell and the donor speak different glyph
+    namespaces (issue #1).
     """
     import defcon
 
@@ -92,6 +99,28 @@ def _build_minimal_ufo(ufo_path, *, with_hints=True, with_features=False):
             ],
         }
 
+    if with_production_names:
+        amacron = font.newGlyph("Amacron")
+        amacron.width = 600
+        amacron.unicode = 0x0100
+        am_pen = amacron.getPen()
+        am_pen.moveTo((100, 0))
+        am_pen.lineTo((500, 0))
+        am_pen.lineTo((500, 900))
+        am_pen.lineTo((100, 900))
+        am_pen.closePath()
+        amacron[0][0].name = "hintRef0000"
+        if with_hints:
+            amacron.lib[ADOBE_HINT_KEY_V2] = {
+                "hintSetList": [
+                    {
+                        "pointTag": "hintRef0000",
+                        "stems": ["vstem 100 400", "hstem 0 900"],
+                    }
+                ],
+            }
+        font.lib["public.postscriptNames"] = {"Amacron": "uni0100"}
+
     if with_features:
         alt = font.newGlyph("A.alt")
         alt.width = 600
@@ -106,16 +135,73 @@ def _build_minimal_ufo(ufo_path, *, with_hints=True, with_features=False):
     font.save(str(ufo_path))
 
 
+_HINT_OP_NAMES = {"hstem", "vstem", "hstemhm", "vstemhm", "hintmask", "cntrmask"}
+
+
 def _hint_ops(otf_path, glyph_name):
     """Return the hint operators present in a glyph's CFF charstring."""
-    hint_op_names = {"hstem", "vstem", "hstemhm", "vstemhm", "hintmask", "cntrmask"}
     tt = TTFont(str(otf_path))
     charstrings = tt["CFF "].cff.topDictIndex[0].CharStrings
     charstring = charstrings[glyph_name]
     charstring.decompile()
-    ops = [op for op in charstring.program if isinstance(op, str) and op in hint_op_names]
+    ops = [op for op in charstring.program if isinstance(op, str) and op in _HINT_OP_NAMES]
     tt.close()
     return ops
+
+
+def _hinted_glyphs(otf_path):
+    """Return the names of glyphs whose charstring carries hints.
+
+    Desubroutinizes first: after ``cffsubr`` the hint operators usually live
+    inside a called subroutine, so a top-level program scan undercounts.
+    """
+    from fontTools import subset
+
+    tt = TTFont(str(otf_path))
+    options = subset.Options()
+    options.desubroutinize = True
+    options.notdef_outline = True
+    options.glyph_names = True
+    options.layout_features = ["*"]
+    options.name_IDs = ["*"]
+    options.name_languages = ["*"]
+    options.notdef_glyph = True
+    subsetter = subset.Subsetter(options=options)
+    subsetter.populate(glyphs=tt.getGlyphOrder())
+    subsetter.subset(tt)
+    charstrings = tt["CFF "].cff.topDictIndex[0].CharStrings
+    hinted = set()
+    for name in charstrings.keys():
+        charstrings[name].decompile()
+        if any(
+            isinstance(op, str) and op in _HINT_OP_NAMES
+            for op in charstrings[name].program
+        ):
+            hinted.add(name)
+    tt.close()
+    return hinted
+
+
+def _cff_widths(otf_path):
+    """Return ``{glyph_name: (cff_width, hmtx_width)}`` for every glyph."""
+    from fontTools.misc.psCharStrings import T2WidthExtractor
+
+    tt = TTFont(str(otf_path))
+    charstrings = tt["CFF "].cff.topDictIndex[0].CharStrings
+    widths = {}
+    for name in tt.getGlyphOrder():
+        charstring = charstrings[name]
+        private = charstring.private
+        extractor = T2WidthExtractor(
+            getattr(private, "Subrs", []),
+            charstring.globalSubrs,
+            private.nominalWidthX,
+            private.defaultWidthX,
+        )
+        extractor.execute(charstring)
+        widths[name] = (extractor.width, tt["hmtx"][name][0])
+    tt.close()
+    return widths
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -172,6 +258,74 @@ class TestPipelineEndToEnd:
 
         tt = TTFont(str(otf_out))
         assert "GSUB" in tt, "shell features (ss01) missing from output"
+        tt.close()
+
+    def test_production_renamed_glyphs_keep_hints(self, tmp_path):
+        """Regression (issue #1): hints must survive `public.postscriptNames`.
+
+        The ufo2ft shell used to be compiled with production names while the
+        `tx -t1` + `makeotf` donor keeps source names, so the per-glyph merge
+        skipped every renamed glyph and shipped it unhinted.
+        """
+        from ufo_tdkit_tools.compilation import compile_otf_preserve_optimized
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in, with_production_names=True)
+
+        stats = {}
+        ok = compile_otf_preserve_optimized(str(ufo_in), str(otf_out), stats=stats)
+        assert ok, "preserve compilation failed"
+
+        tt = TTFont(str(otf_out))
+        glyph_order = tt.getGlyphOrder()
+        tt.close()
+        assert "uni0100" in glyph_order, "production name not applied to output"
+        assert "Amacron" not in glyph_order
+
+        hinted = _hinted_glyphs(otf_out)
+        assert {"A", "uni0100"} <= hinted, f"renamed glyph lost its hints: {hinted}"
+
+        assert stats.get("name_mismatch") == 0, (
+            f"shell and donor disagree on {stats.get('name_mismatch')} glyph name(s)"
+        )
+        assert stats["hints_transferred"] == stats["donor_hinted"] == 2
+
+    def test_transferred_charstrings_keep_their_width(self, tmp_path):
+        """Regression: a merged charstring must not keep the donor's width.
+
+        The width operand is encoded against the donor's
+        ``Private.nominalWidthX``, which is not carried into the shell; reusing
+        it made every hinted glyph report a bogus advance width in the CFF
+        (``tx -dump`` showed 1100 for a 600-unit glyph) while hmtx stayed right.
+        """
+        from ufo_tdkit_tools.compilation import compile_otf_preserve_optimized
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in, with_production_names=True)
+
+        assert compile_otf_preserve_optimized(str(ufo_in), str(otf_out))
+
+        for name, (cff_width, hmtx_width) in _cff_widths(otf_out).items():
+            assert cff_width == hmtx_width, (
+                f"'{name}': CFF width {cff_width} != hmtx width {hmtx_width}"
+            )
+
+    def test_unhinted_ufo_still_gets_production_names(self, tmp_path):
+        """The no-hints shortcut path must apply production names too."""
+        from ufo_tdkit_tools.compilation import compile_otf_preserve_optimized
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in, with_hints=False, with_production_names=True)
+
+        stats = {}
+        assert compile_otf_preserve_optimized(str(ufo_in), str(otf_out), stats=stats)
+        assert stats["hints_transferred"] == 0
+
+        tt = TTFont(str(otf_out))
+        assert "uni0100" in tt.getGlyphOrder()
         tt.close()
 
     def test_auto_source_picks_v2(self, tmp_path):

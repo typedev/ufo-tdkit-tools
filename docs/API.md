@@ -71,8 +71,10 @@ side-by-side. The pipeline is:
    preserved. One created by the pipeline (autohint buffer or optimizer
    buffer) is removed before save.
 7. **Save** the UFO and **compile** the OTF
-   (`compilation.compile_otf_preserve_optimized`). The OTF is then
-   subroutinized with `cffsubr`.
+   (`compilation.compile_otf_preserve_optimized`). Both halves of the compile
+   keep the UFO's source glyph names so the per-glyph merge can match them;
+   production names (`public.postscriptNames`) and `cffsubr` subroutinization
+   are applied to the merged font at the end, via ufo2ft's `PostProcessor`.
 
 ### Hint source resolution
 
@@ -219,12 +221,21 @@ ok: bool = compile_otf_preserve_optimized(
     pshash_rebuild=False,      # rebuild processedglyphs layer before compile
     tx_path=None,              # absolute path to AFDKO tx (auto-detected)
     makeotf_path=None,         # absolute path to AFDKO makeotf (auto-detected)
-    stats=None,                # optional dict, populated with timings
+    stats=None,                # optional dict, see below
 )
 ```
 
 Reads hints from default-layer `com.adobe.type.autohint.v2` only. Returns
 `True` on success.
+
+When `stats` is a dict it is filled with merge counters:
+
+| Key                 | Meaning                                                             |
+| ------------------- | ------------------------------------------------------------------- |
+| `hints_transferred` | Hinted charstrings merged into the shell.                            |
+| `total_glyphs`      | Glyphs in the shell CFF.                                             |
+| `donor_hinted`      | Glyphs carrying hints in the `makeotf` donor.                        |
+| `name_mismatch`     | Shell glyphs with no donor counterpart (should be 0; a large value means the two compiles disagree on glyph names). |
 
 ```python
 from ufo_tdkit_tools.compilation.preserve import preserve_compile, PreserveCompileResult

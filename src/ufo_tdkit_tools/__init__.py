@@ -25,6 +25,7 @@ __all__ = [
     "compute_outline_hash",
     "process_font",
     "ProcessResult",
+    "add_legacy_kern",
 ]
 
 
@@ -33,4 +34,9 @@ def __getattr__(name):
         from .pipeline import ProcessResult, process_font
 
         return {"process_font": process_font, "ProcessResult": ProcessResult}[name]
+    if name == "add_legacy_kern":
+        # fontTools-only; usable without the compilation extra
+        from .compilation.legacy_kern import add_legacy_kern
+
+        return add_legacy_kern
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -299,6 +299,41 @@ batch = preserve_compile_batch(
 # BatchCompileResult: results, successful, failed, skipped_count, total, to_dict()
 ```
 
+#### Legacy `kern` table (`compilation.legacy_kern`)
+
+Needs only fontTools — usable without the `compilation` extra.
+
+```python
+from ufo_tdkit_tools import add_legacy_kern                      # or:
+from ufo_tdkit_tools.compilation import flatten_gpos_kern, build_kern_table
+
+add_legacy_kern(ttf_path: str | Path) -> int
+    # Synthesize a format-0 'kern' table from the font's GPOS 'kern' feature
+    # and rewrite the file in place. Returns the number of pairs written
+    # (0 = no GPOS kerning; the file is left untouched).
+
+flatten_gpos_kern(font: TTFont) -> dict[tuple[str, str], int]
+    # GPOS 'kern' feature -> {(left, right): xAdvance}
+
+build_kern_table(pairs: dict[tuple[str, str], int])
+    # pair dict -> a version-0 'kern' table object (None when pairs is empty)
+```
+
+Microsoft Word (and other Office rendering paths) reads kerning from the old
+`kern` table, not from GPOS, so fonts built by ufo2ft/fontmake lose kerning
+there. `add_legacy_kern` restores it as a compatibility fallback.
+
+What it does **not** carry over: anything a format-0 subtable cannot express —
+vertical or Y adjustments, and contextual kerning lookups inside the `kern`
+feature (kerning exceptions), which are skipped and logged. Overlapping pairs
+resolve first-wins, in feature order. Values are clamped to int16 and pairs
+are split across several subtables past the uint16 `nPairs` limit.
+
+The rewrite touches only the `kern` table: GPOS is flattened on a throwaway
+lazy `TTFont`, so every other table is copied back verbatim and
+`head.modified` is preserved. The one unavoidable change elsewhere is
+`head.checkSumAdjustment`, a whole-file checksum.
+
 ### `ps_hints.parser` — data models & parsing
 
 Always available (core dep: fontTools only).
@@ -410,20 +445,26 @@ layer for you.
 
 ```python
 from ufo_tdkit_tools.ps_hints.batch import (
-    detect_font_source, count_glyphs_with_source,
+    detect_font_source, count_glyphs_with_source, glyphs_missing_source,
     import_all_to_processed, export_all_from_processed,
     remove_all_hints, optimize_font,
 )
 
 detect_font_source(font) -> HintSource | None
     # Whole-font priority: processed > v2 > public_ps. None if no hints.
+    # NB: a source counts as present as soon as ONE glyph has hints.
 
 count_glyphs_with_source(font, source: HintSource) -> int
+
+glyphs_missing_source(font, source: HintSource | None) -> list[str]
+    # Names of drawable glyphs (contours or components) without hints in
+    # `source`; source=None treats every drawable glyph as unhinted.
 
 import_all_to_processed(font, source: HintSource | str) -> int
     # source: HintSource enum or "v2" / "public_ps" / "processed".
 
-export_all_from_processed(font, target: HintSource | str) -> int
+export_all_from_processed(font, target: HintSource | str, names=None) -> int
+    # names: optional iterable restricting the export to those glyphs.
 
 remove_all_hints(font, source: HintSource | str) -> int
 

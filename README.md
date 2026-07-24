@@ -49,6 +49,20 @@ For the lower-level entry points (`extraction.convert_binary_to_ufo`,
 `compilation.compile_otf_preserve_optimized`, the `ps_hints` parser /
 optimizer / validator / batch wrappers), see [`docs/API.md`](docs/API.md).
 
+### Legacy `kern` table for Word
+
+Modern build tools emit kerning only as GPOS, which Microsoft Word ignores.
+`add_legacy_kern` regenerates the old-style `kern` table from the font's own
+GPOS `kern` feature, rewriting the binary so that nothing but `kern` changes:
+
+```python
+from ufo_tdkit_tools import add_legacy_kern
+
+pairs = add_legacy_kern("Sans-Regular.ttf")   # 0 if the font has no GPOS kerning
+```
+
+It needs only fontTools — no extras required.
+
 ## Command line
 
 Installing the package (`uv sync` / `pip install`) provides the

@@ -74,6 +74,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Hint source for UFO inputs (ignored for binary inputs). Default: auto.",
     )
     opt.add_argument(
+        "--autohint",
+        choices=("fill", "all", "off"),
+        default="fill",
+        help="What to do with glyphs the hint source does not cover: 'fill' "
+        "autohints just those (default), 'all' re-hints every glyph and ignores "
+        "authored hints, 'off' leaves them unhinted.",
+    )
+    opt.add_argument(
         "--keep-ufo",
         action="store_true",
         help="With --in-place, also write '<input>.ufo' next to each input "
@@ -127,6 +135,7 @@ def _cmd_optimize_otf(args: argparse.Namespace) -> int:
                 keep_ufo=args.keep_ufo,
                 optimize=args.optimize,
                 hint_source=args.hint_source,
+                autohint=args.autohint,
                 log=log,
             )
         except Exception as exc:  # noqa: BLE001 -- never let one file abort the batch
@@ -143,11 +152,12 @@ def _cmd_optimize_otf(args: argparse.Namespace) -> int:
         if result.autohinted:
             autohinted += 1
         if not args.quiet:
-            extra = " autohinted" if result.autohinted else ""
+            extra = f" autohinted={result.autohinted_count}" if result.autohinted else ""
             opt_note = f" optimized={result.optimized_count}" if result.optimized else ""
             log.info(
                 f"{src}: ok ({result.glyphs_with_hints}/{result.glyphs_total} hinted"
-                f"{opt_note}{extra})"
+                f"{opt_note}{extra} -> otf "
+                f"{result.otf_glyphs_hinted}/{result.otf_glyphs_total})"
             )
 
     # Single machine-parseable summary line on stdout.
@@ -164,6 +174,7 @@ def _process_one(
     keep_ufo: bool,
     optimize: bool,
     hint_source: str,
+    autohint: str,
     log: logging.Logger,
 ):
     """Run one input through process_font, placing outputs per the chosen mode.
@@ -184,6 +195,7 @@ def _process_one(
                 tmp_otf,
                 tmp_ufo,
                 hint_source=hint_source,
+                autohint=autohint,
                 optimize=optimize,
                 logger_=log,
             )
@@ -204,6 +216,7 @@ def _process_one(
         out_otf,
         out_ufo,
         hint_source=hint_source,
+        autohint=autohint,
         optimize=optimize,
         logger_=log,
     )

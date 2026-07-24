@@ -34,7 +34,12 @@ from ufo_tdkit_tools.pipeline import process_font  # noqa: E402
 
 
 def _build_minimal_ufo(
-    ufo_path, *, with_hints=True, with_features=False, with_production_names=False
+    ufo_path,
+    *,
+    with_hints=True,
+    with_features=False,
+    with_production_names=False,
+    hint_glyphs=None,
 ):
     """Build a tiny UFO with one rectangle glyph; optional v-stem/h-stem hint.
 
@@ -46,6 +51,9 @@ def _build_minimal_ufo(
     and a ``public.postscriptNames`` mapping renaming it to ``uni0100`` — the
     setup that used to make the shell and the donor speak different glyph
     namespaces (issue #1).
+
+    ``hint_glyphs`` restricts authored hints to the named glyphs, modelling a
+    hand-hinted master where only base forms carry hints.
     """
     import defcon
 
@@ -88,7 +96,7 @@ def _build_minimal_ufo(
     # name first on-curve point so v2 pointTag has a target
     glyph[0][0].name = "hintRef0000"
 
-    if with_hints:
+    if with_hints and (hint_glyphs is None or "A" in hint_glyphs):
         # Single v-stem covering the rectangle width (100..500 -> width 400)
         glyph.lib[ADOBE_HINT_KEY_V2] = {
             "hintSetList": [
@@ -110,7 +118,7 @@ def _build_minimal_ufo(
         am_pen.lineTo((100, 900))
         am_pen.closePath()
         amacron[0][0].name = "hintRef0000"
-        if with_hints:
+        if with_hints and (hint_glyphs is None or "Amacron" in hint_glyphs):
             amacron.lib[ADOBE_HINT_KEY_V2] = {
                 "hintSetList": [
                     {
@@ -351,6 +359,105 @@ class TestPipelineEndToEnd:
         )
         assert result.success is False
         assert "no hints" in result.error.lower()
+
+    def test_partially_hinted_source_gets_gaps_filled(self, tmp_path):
+        """Regression (issue #1, second defect): the autohint gate was per font.
+
+        `detect_font_source` reports a source as soon as ONE glyph has hints, so
+        a hand-hinted master (base forms only) was treated as fully hinted and
+        every other glyph shipped unhinted.
+        """
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in, with_production_names=True, hint_glyphs={"A"})
+
+        result = process_font(
+            ufo_in, otf_out, tmp_path / "out.ufo", hint_source="auto", optimize=False
+        )
+
+        assert result.success, f"pipeline failed: {result.error}"
+        assert result.hint_source_used == "autohint_v2", "authored source must win"
+        assert result.glyphs_with_hints == 1
+        assert result.autohinted is True
+        assert result.autohinted_count == 1, "the unhinted glyph was not filled in"
+        assert result.otf_glyphs_hinted == 2
+
+        assert {"A", "uni0100"} <= _hinted_glyphs(otf_out)
+
+    def test_autohint_off_leaves_gaps_unhinted(self, tmp_path):
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in, with_production_names=True, hint_glyphs={"A"})
+
+        result = process_font(
+            ufo_in,
+            otf_out,
+            tmp_path / "out.ufo",
+            hint_source="auto",
+            autohint="off",
+            optimize=False,
+        )
+
+        assert result.success, f"pipeline failed: {result.error}"
+        assert result.autohinted is False
+        assert result.autohinted_count == 0
+        assert result.otf_glyphs_hinted == 1
+
+        hinted = _hinted_glyphs(otf_out)
+        assert "A" in hinted and "uni0100" not in hinted
+
+    def test_autohint_all_ignores_authored_hints(self, tmp_path):
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        ufo_out = tmp_path / "out.ufo"
+        _build_minimal_ufo(ufo_in, with_production_names=True, hint_glyphs={"A"})
+
+        result = process_font(
+            ufo_in, otf_out, ufo_out, hint_source="auto", autohint="all", optimize=False
+        )
+
+        assert result.success, f"pipeline failed: {result.error}"
+        assert result.hint_source_used == "processedglyphs"
+        assert result.autohinted is True
+        assert result.autohinted_count == 2, "every drawable glyph should be re-hinted"
+        assert result.otf_glyphs_hinted == 2
+
+    def test_autohint_off_with_no_hints_anywhere_fails(self, tmp_path):
+        ufo_in = tmp_path / "in.ufo"
+        _build_minimal_ufo(ufo_in, with_hints=False)
+
+        result = process_font(
+            ufo_in,
+            tmp_path / "out.otf",
+            tmp_path / "out.ufo",
+            hint_source="auto",
+            autohint="off",
+        )
+
+        assert result.success is False
+        assert "autohint is off" in result.error
+
+    def test_filled_ufo_has_no_leftover_processed_layer(self, tmp_path):
+        """The autohint buffer and its hash map must not reach the output UFO."""
+        import defcon
+
+        from ufo_tdkit_tools.constants import PROCESSED_LAYER_NAME
+
+        ufo_in = tmp_path / "in.ufo"
+        ufo_out = tmp_path / "out.ufo"
+        _build_minimal_ufo(ufo_in, with_production_names=True, hint_glyphs={"A"})
+
+        result = process_font(
+            ufo_in, tmp_path / "out.otf", ufo_out, hint_source="auto", optimize=False
+        )
+        assert result.success, f"pipeline failed: {result.error}"
+
+        out = defcon.Font(str(ufo_out))
+        assert PROCESSED_LAYER_NAME not in out.layers
+        assert not (ufo_out / "data" / "com.adobe.type.processedHashMap").exists()
+        # ... and the filled-in hints landed in the default layer where the
+        # compiler reads them
+        assert out["Amacron"].lib.get(ADOBE_HINT_KEY_V2)
 
     def test_unhinted_ufo_auto_triggers_autohint(self, tmp_path):
         ufo_in = tmp_path / "in.ufo"

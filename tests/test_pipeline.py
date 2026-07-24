@@ -19,6 +19,10 @@ class _FakeGlyph:
     def __init__(self, name, lib=None):
         self.name = name
         self.lib = lib or {}
+        self.components = []
+
+    def __len__(self):
+        return 0  # no contours -- nothing to autohint
 
 
 class _FakeLayer:
@@ -86,10 +90,20 @@ class TestResolveSource:
         self.log = logging.getLogger("test")
 
     def test_binary_always_v2(self):
-        font = _FakeFont(glyphs=[_FakeGlyph("a")])
+        from ufo_tdkit_tools.constants import ADOBE_HINT_KEY_V2
+
+        font = _FakeFont(
+            glyphs=[_FakeGlyph("a", {ADOBE_HINT_KEY_V2: {"hintSetList": [{"stems": []}]}})]
+        )
         assert _resolve_source(font, "auto", True, self.log) == HintSource.AUTOHINT_V2
         # Even explicit hint_source is ignored for binary
         assert _resolve_source(font, "public_ps", True, self.log) == HintSource.AUTOHINT_V2
+
+    def test_binary_without_extracted_hints_returns_none(self):
+        """An unhinted CFF (or any TTF) yields nothing to preserve — the
+        autohinter has to supply every glyph."""
+        font = _FakeFont(glyphs=[_FakeGlyph("a")])
+        assert _resolve_source(font, "auto", True, self.log) is None
 
     def test_auto_with_no_hints_returns_none(self):
         font = _FakeFont(glyphs=[_FakeGlyph("a")])

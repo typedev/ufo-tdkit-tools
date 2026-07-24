@@ -76,6 +76,29 @@ def count_glyphs_with_source(font, source: HintSource) -> int:
     return sum(1 for glyph in font if source in get_available_sources(glyph, font=font))
 
 
+def glyphs_missing_source(font, source: HintSource | None) -> list[str]:
+    """Names of drawable glyphs that have no hints in ``source``.
+
+    Empty glyphs (no contours and no components, e.g. ``space``) are excluded:
+    there is nothing to hint, and the autohinter skips them anyway.
+
+    Args:
+        font: fontParts ``RFont`` (or compatible).
+        source: Source to check, or ``None`` to treat every drawable glyph as
+            unhinted (no source was detected at all).
+
+    Returns:
+        Glyph names in font order.
+    """
+    missing = []
+    for glyph in font:
+        if not len(glyph) and not len(glyph.components):
+            continue
+        if source is None or source not in get_available_sources(glyph, font=font):
+            missing.append(glyph.name)
+    return missing
+
+
 def import_all_to_processed(font, source: HintSource | str) -> int:
     """Import hints from ``source`` into the processedglyphs layer for every glyph.
 
@@ -99,13 +122,26 @@ def import_all_to_processed(font, source: HintSource | str) -> int:
     return count
 
 
-def export_all_from_processed(font, target: HintSource | str) -> int:
-    """Export hints from processedglyphs to ``target`` for every glyph."""
+def export_all_from_processed(font, target: HintSource | str, names=None) -> int:
+    """Export hints from processedglyphs to ``target``.
+
+    Args:
+        font: fontParts font.
+        target: ``"v2"`` or ``"public_ps"`` (or the matching :class:`HintSource`).
+        names: Optional iterable of glyph names to restrict the export to.
+            ``None`` exports every glyph.
+
+    Returns:
+        Number of glyphs exported.
+    """
     tgt = _to_source_string(target)
     if tgt == "processed":
         return 0
+    selected = None if names is None else set(names)
     count = 0
     for glyph in font:
+        if selected is not None and glyph.name not in selected:
+            continue
         if export_from_processed(glyph, font, tgt):
             count += 1
     return count

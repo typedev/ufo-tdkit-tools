@@ -14,6 +14,7 @@ from ufo_tdkit_tools.ps_hints.batch import (
     _to_source_string,
     count_glyphs_with_source,
     detect_font_source,
+    glyphs_missing_source,
 )
 from ufo_tdkit_tools.ps_hints.parser import HintSource
 
@@ -22,9 +23,14 @@ from ufo_tdkit_tools.ps_hints.parser import HintSource
 
 
 class _FakeGlyph:
-    def __init__(self, name, lib=None):
+    def __init__(self, name, lib=None, contours=1, components=()):
         self.name = name
         self.lib = lib or {}
+        self._contours = contours
+        self.components = list(components)
+
+    def __len__(self):
+        return self._contours
 
 
 class _FakeLayer:
@@ -140,3 +146,49 @@ class TestCountGlyphsWithSource:
     def test_count_public_ps_zero(self):
         font = _FakeFont(glyphs=[_FakeGlyph("a", {ADOBE_HINT_KEY_V2: _hint_dict()})])
         assert count_glyphs_with_source(font, HintSource.PUBLIC_PS) == 0
+
+
+# ── glyphs_missing_source ─────────────────────────────────────────────────────
+
+
+class TestGlyphsMissingSource:
+    def test_returns_unhinted_drawable_glyphs(self):
+        font = _FakeFont(
+            glyphs=[
+                _FakeGlyph("a", {ADOBE_HINT_KEY_V2: _hint_dict()}),
+                _FakeGlyph("b"),
+                _FakeGlyph("c"),
+            ]
+        )
+        assert glyphs_missing_source(font, HintSource.AUTOHINT_V2) == ["b", "c"]
+
+    def test_empty_glyphs_are_skipped(self):
+        # 'space' has neither contours nor components -- nothing to hint
+        font = _FakeFont(
+            glyphs=[_FakeGlyph("space", contours=0), _FakeGlyph("b")]
+        )
+        assert glyphs_missing_source(font, HintSource.AUTOHINT_V2) == ["b"]
+
+    def test_composite_without_contours_is_included(self):
+        font = _FakeFont(
+            glyphs=[_FakeGlyph("Aacute", contours=0, components=["A", "acute"])]
+        )
+        assert glyphs_missing_source(font, HintSource.AUTOHINT_V2) == ["Aacute"]
+
+    def test_none_source_means_everything_is_missing(self):
+        font = _FakeFont(
+            glyphs=[
+                _FakeGlyph("a", {ADOBE_HINT_KEY_V2: _hint_dict()}),
+                _FakeGlyph("b"),
+            ]
+        )
+        assert glyphs_missing_source(font, None) == ["a", "b"]
+
+    def test_fully_hinted_font_has_no_gaps(self):
+        font = _FakeFont(
+            glyphs=[
+                _FakeGlyph("a", {ADOBE_HINT_KEY_V2: _hint_dict()}),
+                _FakeGlyph("b", {ADOBE_HINT_KEY_V2: _hint_dict()}),
+            ]
+        )
+        assert glyphs_missing_source(font, HintSource.AUTOHINT_V2) == []

@@ -30,15 +30,20 @@ result = process_font(
     "out.otf",
     "out.ufo",
     hint_source="auto",   # priority: processed > v2 > public_ps
+    autohint="fill",      # "fill" | "all" | "off"
     optimize=False,       # set True to run the ps_hints optimizer
 )
 assert result.success
 print(result.glyphs_with_hints, "/", result.glyphs_total,
-      "autohinted=", result.autohinted)
+      "autohinted=", result.autohinted_count,
+      "in otf=", result.otf_glyphs_hinted)
 ```
 
-If the input has no hints, the pipeline runs `afdko.otfautohint`
-automatically (`result.autohinted is True`).
+Glyphs the chosen source does not hint are autohinted individually with
+`afdko.otfautohint` — a partially hinted master (base forms hinted,
+composites not) comes out fully hinted, with the authored hints kept.
+`autohint="all"` re-hints everything instead, `autohint="off"` leaves the
+gaps alone.
 
 For the lower-level entry points (`extraction.convert_binary_to_ufo`,
 `compilation.compile_otf_preserve_optimized`, the `ps_hints` parser /
@@ -59,6 +64,9 @@ ufo-tdkit-tools optimize-otf -o build/ Sans-Regular.otf Sans-Bold.otf
 
 # Skip the ps_hints optimizer (autohint + compile only)
 ufo-tdkit-tools optimize-otf --in-place --no-optimize *.otf
+
+# Keep only the authored hints, never call the autohinter
+ufo-tdkit-tools optimize-otf -o build/ --autohint off Src.ufo
 ```
 
 Every run prints one machine-parseable summary line and exits non-zero if

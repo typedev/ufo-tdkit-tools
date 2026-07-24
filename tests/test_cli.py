@@ -48,6 +48,18 @@ class TestArgumentParsing:
                 ["optimize-otf", "--hint-source", "bogus", "-o", "out", "a.ufo"]
             )
 
+    def test_autohint_choices(self):
+        ns = _build_parser().parse_args(["optimize-otf", "-o", "out", "a.ufo"])
+        assert ns.autohint == "fill"
+        ns = _build_parser().parse_args(
+            ["optimize-otf", "--autohint", "off", "-o", "out", "a.ufo"]
+        )
+        assert ns.autohint == "off"
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(
+                ["optimize-otf", "--autohint", "bogus", "-o", "out", "a.ufo"]
+            )
+
 
 class TestSummaryAndExitCodes:
     def test_missing_file_reports_failure(self, tmp_path, capsys):

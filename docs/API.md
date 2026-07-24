@@ -47,6 +47,7 @@ result: ProcessResult = process_font(
     output_ufo,                      # Path | str
     *,
     hint_source="auto",              # "auto" | "v2" | "processed" | "public_ps"
+    autohint="fill",                 # "fill" | "all" | "off"
     optimize=False,                  # run the ps_hints optimizer
     logger_=None,                    # Optional[logging.Logger]
 )
@@ -59,9 +60,12 @@ side-by-side. The pipeline is:
    `extraction.convert_binary_to_ufo`. UFO inputs are copied into a working
    directory so the original is never mutated.
 2. **Resolve hint source.** See [Hint source resolution](#hint-source-resolution).
-3. **Autohint** if the chosen source has zero hinted glyphs. Calls
-   `afdko.otfautohint.hintFiles` on the working UFO and proceeds with the
-   generated hints. `result.autohinted` is set to `True`.
+3. **Autohint the gaps.** Every drawable glyph the chosen source does not
+   hint is passed to `afdko.otfautohint.hintFiles` (`glyphList` restricted to
+   exactly those glyphs), and its hints join the authored ones in the
+   `processedglyphs` buffer. See [Autohint modes](#autohint-modes).
+   `result.autohinted` records whether the autohinter ran,
+   `result.autohinted_count` how many glyphs it hinted.
 4. **Optimize** (when `optimize=True`). Hints are routed through the
    `processedglyphs` layer for the optimizer, then exported back to default
    `autohint.v2`.
@@ -80,7 +84,7 @@ side-by-side. The pipeline is:
 
 | Argument        | Behaviour                                                                               |
 | --------------- | --------------------------------------------------------------------------------------- |
-| `"auto"`        | UFO: priority `processed > v2 > public_ps`. Nothing anywhere → autohint.                |
+| `"auto"`        | UFO: priority `processed > v2 > public_ps`. Nothing anywhere → autohint everything.      |
 |                 | Binary: hints are always read from extracted CFF; if extraction yielded none → autohint.|
 | `"v2"`          | UFO only. Read default-layer `com.adobe.type.autohint.v2`. 0 hinted glyphs → fail.       |
 | `"processed"`   | UFO only. Read `com.adobe.type.processedglyphs` layer. 0 hinted glyphs → fail.           |
@@ -88,7 +92,21 @@ side-by-side. The pipeline is:
 
 The pipeline picks **one** source for the entire font. Per-glyph mixed
 sources are not supported; lower-priority sources are silently dropped from
-the output.
+the output. Glyphs the chosen source does not cover are handled by
+`autohint`, not by falling back to another source.
+
+### Autohint modes
+
+| `autohint` | Glyphs hinted by the source | Glyphs without hints             |
+| ---------- | --------------------------- | -------------------------------- |
+| `"fill"` (default) | kept as authored     | autohinted                       |
+| `"all"`    | discarded and re-hinted     | autohinted                       |
+| `"off"`    | kept as authored            | left unhinted                    |
+
+`"off"` also turns "no hints anywhere" into a failure instead of hinting the
+whole font. Note that `detect_font_source` reports a source as soon as **one**
+glyph has hints, which is why partially hinted masters (base forms hinted,
+composites not) need `"fill"` rather than the old whole-font gate.
 
 ### Coverage matrix
 
@@ -96,7 +114,8 @@ the output.
 | ---------------- | --------------------- | ------------------------ | ---------------------------- | ------------ |
 | OTF/TTF/WOFF     | yes                   | (ignored)                | extract → preserve           | False        |
 | OTF/TTF/WOFF     | no                    | (ignored)                | extract → autohint → compile | True         |
-| UFO              | yes (any source)      | `auto`                   | preserve by priority         | False        |
+| UFO              | yes (all glyphs)      | `auto`                   | preserve by priority         | False        |
+| UFO              | yes (some glyphs)     | `auto`                   | preserve + autohint the rest | True         |
 | UFO              | no                    | `auto`                   | autohint → compile           | True         |
 | UFO              | yes (matching)        | `v2`/`processed`/`public_ps` | preserve from that source | False        |
 | UFO              | no (matching source)  | `v2`/`processed`/`public_ps` | **fail** (`No hints found`) | —          |
@@ -140,13 +159,21 @@ class ProcessResult:
     optimized: bool = False               # was the optimizer run?
     optimized_count: int = 0              # # of glyphs optimized
     autohinted: bool = False              # did otfautohint run?
+    autohinted_count: int = 0             # # of glyphs it hinted
+    otf_glyphs_hinted: int = 0            # hinted charstrings in the output OTF
+    otf_glyphs_total: int = 0             # glyphs in the output OTF
     error: str | None = None              # set on failure
 ```
 
-`hint_source_used` reflects the source that ended up driving the compile.
-After autohinting it is `"processedglyphs"` (because the autohinter writes
-to that layer). To distinguish "preserved hints" from "generated hints",
-check `autohinted`.
+`hint_source_used` reflects the authored source that drove the compile. When
+there was none (nothing hinted anywhere, or `autohint="all"`) it is
+`"processedglyphs"`, the layer the autohinter writes to. To distinguish
+"preserved hints" from "generated hints", check `autohinted` /
+`autohinted_count` — with `autohint="fill"` a font can have both.
+
+`otf_glyphs_hinted` / `otf_glyphs_total` come from the compiler and describe
+what actually reached the binary; they are the numbers to assert on in a
+build-level regression guard.
 
 ---
 

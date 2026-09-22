@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Compilation could not find `tx` / `makeotf` on Windows when they were not on `PATH`.** The last-resort lookup next to `sys.executable` joined a bare `tx` / `makeotf`, which never exists on Windows — the venv has `tx.exe` / `makeotf.exe` in `Scripts\`. It now goes through `shutil.which(name, path=venv_bin)`, so `PATHEXT` applies. Callers that pass `tx_path` / `makeotf_path`, or have the tools on `PATH`, were unaffected.
+
+### Changed
+
+- CI runs on Windows as well as Linux and macOS, and checks `ruff format`; the whole tree was reformatted once (no behaviour change).
+
 ## [0.2.0] - 2026-09-22
 
 First release published on PyPI.

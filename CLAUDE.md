@@ -106,6 +106,13 @@ The same caveat applies to byte-level diffs of individual charstrings: `cs.progr
 - **Stateless functions** for compilation — enables safe parallel processing
 - **AFDKO Python API over subprocess** where possible — extraction calls `afdko.otfautohint` Python functions in-process; compilation still subprocesses `tx` and `makeotf` because they're external binaries
 
+## Public API and releases
+
+- `tests/test_public_api.py` pins the names, module paths, keyword arguments and result fields TDKit relies on (`pipeline.process_font`, `compilation.compile_otf_preserve*` / `preserve_compile*` / result dataclasses, `ps_hints.validate_ps_hints`). Changing any of them is a breaking change: bump the minor version (0.x) and say so in CHANGELOG.
+- The version lives only in `pyproject.toml`; `__version__` comes from package metadata.
+- `afdko` stays `<6` until the compiler calls `afdko tx` / `afdko makeotf` instead of the bare wrappers AFDKO 6 removes.
+- Release: `make release-checklist` prints the order of operations. Publishing a GitHub Release runs `.github/workflows/publish.yml` (Trusted Publishing, no token); `make verify` is the local build/twine/wheel gate.
+
 ## Code Style
 
 - Line length: 100 chars (ruff)

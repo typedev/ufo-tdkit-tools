@@ -1,0 +1,64 @@
+name: Publish to PyPI
+
+# Uploads to PyPI with **no stored credential**. GitHub mints a short-lived OIDC token
+# proving "this run is workflow publish.yml in typedev/ufo-tdkit-tools"; PyPI checks that
+# against the trusted publisher registered for this project and exchanges it for an upload
+# token valid for about fifteen minutes. Nothing long-lived exists to leak.
+#
+# Triggered by **publishing the GitHub Release**, the last step of the release procedure
+# (`make release-checklist`). Tying the upload to it means PyPI and the repo move together.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Nothing by default; each job asks for exactly what it needs.
+permissions: {}
+
+jobs:
+  publish:
+    name: Build, verify and publish
+    runs-on: ubuntu-latest
+    # Register this same environment name on PyPI alongside the workflow filename. A
+    # required reviewer on it in GitHub adds an explicit Approve step before any upload.
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # the OIDC token; without this the exchange cannot happen at all
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      # Unconditional: a manual run from a branch must not publish whatever pyproject
+      # happens to say with no tag describing it. workflow_dispatch can select a tag.
+      - name: Refuse to publish anything but a tag whose version matches
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "error: this ran on $GITHUB_REF_TYPE '$GITHUB_REF_NAME', not a tag."
+            echo "       Publish from a release, or dispatch this workflow on a tag."
+            exit 1
+          fi
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "error: pyproject says $version but this is $GITHUB_REF_NAME."
+            echo "       Publishing would put a version on PyPI that no tag describes."
+            exit 1
+          fi
+          echo "ok: publishing $version from $GITHUB_REF_NAME"
+
+      # The same gates the manual path uses: `check` is the suite and ruff, `verify` builds,
+      # runs `twine check --strict`, and installs the built wheel into a throwaway venv.
+      - run: uv sync --frozen
+      - run: make check
+      - run: make verify
+
+      # `always` so a misconfigured publisher fails here, loudly, instead of falling back
+      # to looking for a token that does not exist.
+      - name: Publish
+        run: uv publish --trusted-publishing always dist/*

@@ -546,7 +546,7 @@ def reload_processed_layer(font, glyph_names: list[str]) -> None:
     """
     try:
         naked_font = font.naked()
-        layer_names = [l.name for l in naked_font.layers]
+        layer_names = [layer.name for layer in naked_font.layers]
 
         if PROCESSED_LAYER_NAME not in layer_names:
             # Layer was created on disk by otfautohint but defcon doesn't

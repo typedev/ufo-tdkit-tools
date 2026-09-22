@@ -13,9 +13,7 @@ def __getattr__(name):
     _compiler_names = {
         "compile_otf_preserve",
         "compile_otf_preserve_optimized",
-        "generate_goadb",
         "is_preserve_mode",
-        "prepare_processedglyphs",
     }
     _legacy_kern_names = {
         "add_legacy_kern",
@@ -48,9 +46,7 @@ __all__ = [
     "flatten_gpos_kern",
     "compile_otf_preserve",
     "compile_otf_preserve_optimized",
-    "generate_goadb",
     "is_preserve_mode",
-    "prepare_processedglyphs",
     "BatchCompileResult",
     "PreserveCompileResult",
     "preserve_compile",

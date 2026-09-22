@@ -1,6 +1,12 @@
 """ufo-tdkit-tools: PS hints extraction, optimization, and compilation for UFO fonts."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    # Single source of truth: the version in pyproject.toml, via package metadata.
+    __version__ = _pkg_version("ufo-tdkit-tools")
+except PackageNotFoundError:  # running from a source tree without an install
+    __version__ = "0.0.0+unknown"
 
 from .constants import (
     ADOBE_HINT_KEY_V2,

@@ -759,7 +759,7 @@ wheels = [
 
 [[package]]
 name = "ufo-tdkit-tools"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fonttools" },
@@ -799,8 +799,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "afdko", marker = "extra == 'compilation'", specifier = ">=5.0.0" },
-    { name = "afdko", marker = "extra == 'extraction'", specifier = ">=5.0.0" },
+    { name = "afdko", marker = "extra == 'compilation'", specifier = ">=5.0.0,<6" },
+    { name = "afdko", marker = "extra == 'extraction'", specifier = ">=5.0.0,<6" },
     { name = "cffsubr", marker = "extra == 'compilation'" },
     { name = "defcon", marker = "extra == 'compilation'" },
     { name = "defcon", marker = "extra == 'extraction'" },

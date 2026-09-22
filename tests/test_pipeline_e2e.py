@@ -157,11 +157,11 @@ def _hint_ops(otf_path, glyph_name):
     return ops
 
 
-def _hinted_glyphs(otf_path):
-    """Return the names of glyphs whose charstring carries hints.
+def _desubroutinized_programs(otf_path):
+    """Return ``{glyph_name: program}`` with subroutine calls inlined.
 
-    Desubroutinizes first: after ``cffsubr`` the hint operators usually live
-    inside a called subroutine, so a top-level program scan undercounts.
+    After ``cffsubr`` the hint operators usually live inside a called
+    subroutine, so a top-level program scan undercounts.
     """
     from fontTools import subset
 
@@ -178,16 +178,55 @@ def _hinted_glyphs(otf_path):
     subsetter.populate(glyphs=tt.getGlyphOrder())
     subsetter.subset(tt)
     charstrings = tt["CFF "].cff.topDictIndex[0].CharStrings
-    hinted = set()
+    programs = {}
     for name in charstrings.keys():
         charstrings[name].decompile()
-        if any(
-            isinstance(op, str) and op in _HINT_OP_NAMES
-            for op in charstrings[name].program
-        ):
-            hinted.add(name)
+        programs[name] = list(charstrings[name].program)
     tt.close()
-    return hinted
+    return programs
+
+
+def _hinted_glyphs(otf_path):
+    """Return the names of glyphs whose charstring carries hints."""
+    return {
+        name
+        for name, program in _desubroutinized_programs(otf_path).items()
+        if any(isinstance(op, str) and op in _HINT_OP_NAMES for op in program)
+    }
+
+
+def _declared_stems(program):
+    """Return ``{"hstem": [(pos, width), ...], "vstem": [...]}`` from a program.
+
+    Stem operands are delta-encoded (each edge relative to the previous one);
+    a leading odd operand on the first stack-clearing operator is the width
+    and is dropped. ``vstem`` arguments implied by a following ``hintmask``
+    (the Type 2 shortcut) are counted as vstems.
+    """
+    stems = {"hstem": [], "vstem": []}
+    stack = []
+    seen_stack_clearing = False
+    for token in program:
+        if not isinstance(token, str):
+            stack.append(token)
+            continue
+        kind = None
+        if token in ("hstem", "hstemhm"):
+            kind = "hstem"
+        elif token in ("vstem", "vstemhm") or (token in ("hintmask", "cntrmask") and stack):
+            kind = "vstem"
+        if kind is not None:
+            args = stack
+            if not seen_stack_clearing and len(args) % 2:
+                args = args[1:]
+            pos = 0
+            for edge, width in zip(args[0::2], args[1::2]):
+                pos += edge
+                stems[kind].append((pos, width))
+                pos += width
+        seen_stack_clearing = True
+        stack = []
+    return stems
 
 
 def _cff_widths(otf_path):
@@ -235,6 +274,29 @@ class TestPipelineEndToEnd:
         assert "CFF " in tt
         assert "A" in tt.getGlyphOrder()
         tt.close()
+
+    def test_authored_hint_values_survive_preserve_compile(self, tmp_path):
+        """Authored ``autohint.v2`` stems reach the CFF with their exact values.
+
+        Goes through ``compile_otf_preserve`` directly (TDKit's preserve mode)
+        on a UFO without a processedglyphs layer, and checks the declared stem
+        positions and widths -- not just that some hint operator is present.
+        """
+        import defcon
+
+        from ufo_tdkit_tools.compilation import compile_otf_preserve
+        from ufo_tdkit_tools.constants import PROCESSED_LAYER_NAME
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in)
+
+        assert compile_otf_preserve(str(ufo_in), str(otf_out)), "preserve compilation failed"
+
+        stems = _declared_stems(_desubroutinized_programs(otf_out)["A"])
+        assert stems["hstem"] == [(0, 700)]
+        assert stems["vstem"] == [(100, 400)]
+        assert PROCESSED_LAYER_NAME not in defcon.Font(str(ufo_in)).layers
 
     def test_hints_survive_with_features_present(self, tmp_path):
         """Regression: a UFO WITH a features.fea must still get its authored

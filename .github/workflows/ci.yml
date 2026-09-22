@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor from `requires-python` and the current release. The e2e suite shells
+        # out to AFDKO's `tx` / `makeotf`, whose wheels are platform-specific, so both
+        # Unix platforms run it. Windows is not in the matrix yet: the tool-path fallback
+        # in `compilation/compiler.py` does not append `.exe`.
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        # Pinned to an exact release: setup-uv stopped publishing a moving major tag
+        # after v7, so `@v10` does not resolve at all.
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+
+      - name: Install
+        # Plain `uv sync` installs every extra plus the dev group (pyproject: dependency-groups.dev).
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check src/ tests/
+
+      - name: Test
+        # `uv run` puts .venv/bin on PATH, which is where afdko installs `tx` and `makeotf`;
+        # without them the e2e modules skip instead of failing, so assert they are there.
+        run: |
+          uv run python -c "import shutil, sys; sys.exit(not (shutil.which('tx') and shutil.which('makeotf')))"
+          uv run pytest -q

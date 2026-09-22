@@ -1,5 +1,8 @@
 # ufo-tdkit-tools
 
+[![PyPI](https://img.shields.io/pypi/v/ufo-tdkit-tools)](https://pypi.org/project/ufo-tdkit-tools/)
+[![CI](https://github.com/typedev/ufo-tdkit-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/typedev/ufo-tdkit-tools/actions/workflows/ci.yml)
+
 PS hints extraction, optimization, and preserve-mode compilation for UFO fonts.
 
 ## Features
@@ -16,6 +19,8 @@ pip install ufo-tdkit-tools[extraction]        # + binary font conversion
 pip install ufo-tdkit-tools[compilation]       # + OTF compilation with hints
 pip install ufo-tdkit-tools[all]               # everything
 ```
+
+The `extraction` and `compilation` extras pull in [AFDKO](https://github.com/adobe-type-tools/afdko) (`>=5,<6`), whose wheels ship the `tx` and `makeotf` executables the compiler runs — nothing needs to be installed separately.
 
 ## Quick start
 

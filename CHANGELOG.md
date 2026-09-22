@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-22
+
+First release published on PyPI.
+
 ### Fixed
 
 - **Preserve mode dropped the hints of every production-renamed glyph** ([#1](https://github.com/typedev/ufo-tdkit-tools/issues/1)). The per-glyph charstring merge matches by glyph name, but the two halves of the compile used different name sets: the ufo2ft shell was built with production names (`uni0100`) while the `tx -t1` + `makeotf` donor ignores `public.postscriptNames` and keeps source names (`Amacron`). Every renamed glyph failed the `glyph_name not in hinted_cs` test and was silently skipped — on DIN 2014 that is 488 of 829 glyphs per face, shipping OTFs with 32.5 % of glyphs hinted against 99.3 % for the same sources built with the external autohinter. The shell is now compiled with `useProductionNames=False` so both sides share the UFO's source namespace, and renaming is deferred to after the merge, delegated to ufo2ft's own `PostProcessor` (same code path a plain `compileOTF` runs: lib mapping, `uniXXXX` derivation, collision suffixes, invalid-character stripping) which also performs the `cffsubr` subroutinization. New e2e regression test `test_production_renamed_glyphs_keep_hints`.
@@ -29,11 +33,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **`process_font` autohints by default** (`autohint="fill"`). Previously the autohinter only ran when the font had no hints at all; now it also fills per-glyph gaps. Callers that want the old behaviour pass `autohint="off"` — with the caveat that "no hints anywhere" then fails instead of falling back to the autohinter.
 - **`_resolve_source` returns `None` for a binary input whose extraction yielded no hints** (it used to return `AUTOHINT_V2` unconditionally); the pipeline treats that as "the autohinter supplies everything", which is what it did before by a separate branch.
-- **Compilation now uses the `makeotf` wrapper** instead of the deprecated `makeotfexe` binary, which is a stub on AFDKO releases scheduling its removal after March 2027 (returns exit 1 with a deprecation message and produces no output). `_compile_makeotf_hinted` resolves and subprocess-runs `makeotf`, sets `PATH` so the wrapper finds its own `tx` / `addfeatures` / `spot`, passes `features.fea` explicitly via `-ff`, and asserts the output file exists after a returncode-0 to guard against future stub regressions.
+- **Compilation now uses the `makeotf` wrapper** instead of the deprecated `makeotfexe` binary, which is a stub on AFDKO releases scheduling its removal after March 2027 (returns exit 1 with a deprecation message and produces no output). `_compile_makeotf_hinted` resolves and subprocess-runs `makeotf`, sets `PATH` so the wrapper finds its own `tx` / `addfeatures` / `spot`, and asserts the output file exists after a returncode-0 to guard against future stub regressions.
+- **`afdko` is capped at `<6`** in the `extraction` and `compilation` extras. AFDKO 6 drops the bare `tx` / `makeotf` command wrappers in favour of `afdko tx` / `afdko makeotf`, which the compiler does not call yet.
+- **Packaging**: `__version__` is read from the installed package metadata (`pyproject.toml` is the single source), the license is declared as an SPDX expression, and Python 3.13 is listed and tested in CI.
 - **API rename**: `makeotfexe_path` → `makeotf_path` on `compile_otf_preserve`, `compile_otf_preserve_optimized`, `preserve_compile`, `preserve_compile_batch`. Auto-detection now resolves `makeotf` via `shutil.which`.
 
 ### Removed
 
+- **`compilation.generate_goadb` and `compilation.prepare_processedglyphs`** (and their private helpers). Neither was called anywhere: the per-glyph merge matches by name, so the donor glyph order no longer needs a GlyphOrderAndAliasDB, and the compiler reads hints from default-layer `autohint.v2` only — a processedglyphs layer built for `tx` would carry decomposed outlines whose hint point references no longer match.
 - The in-house `HintExtractingDecompiler` (subclass of `SimpleT2Decompiler`) is replaced by `convertT2ToGlyphData` from `afdko.otfautohint`, which already parses stems, `startmasks`, per-pathElement masks, and counter masks correctly.
 
 ## [0.1.0] - 2026-04-03
@@ -45,3 +52,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `extraction` module: binary font (OTF/TTF/WOFF/WOFF2) to UFO conversion with CFF hint extraction and feature cleanup
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
+
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/typedev/ufo-tdkit-tools/releases/tag/v0.2.0

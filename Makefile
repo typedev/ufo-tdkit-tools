@@ -35,6 +35,7 @@ test: ## Run the full suite
 
 lint: ## Ruff
 	uv run ruff check src/ tests/
+	uv run ruff format --check src/ tests/
 
 check: test lint ## Suite + lint
 

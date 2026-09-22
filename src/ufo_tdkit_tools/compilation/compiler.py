@@ -132,10 +132,20 @@ def _compile_makeotf_hinted(
     # 1. Pre-resolved paths from main process (via config)
     # 2. shutil.which() (works if PATH includes virtualenv bin/)
     # 3. Same directory as sys.executable (always works in virtualenv)
+    # Step 3 goes through shutil.which too, so Windows' PATHEXT finds tx.exe /
+    # makeotf.exe in the venv's Scripts directory.
     venv_bin = os.path.dirname(sys.executable)
 
-    tx_bin = tx_path or shutil.which("tx") or os.path.join(venv_bin, "tx")
-    makeotf_bin = makeotf_path or shutil.which("makeotf") or os.path.join(venv_bin, "makeotf")
+    def _resolve(explicit, name):
+        return (
+            explicit
+            or shutil.which(name)
+            or shutil.which(name, path=venv_bin)
+            or os.path.join(venv_bin, name)
+        )
+
+    tx_bin = _resolve(tx_path, "tx")
+    makeotf_bin = _resolve(makeotf_path, "makeotf")
 
     if not os.path.isfile(tx_bin) or not os.path.isfile(makeotf_bin):
         if logger:

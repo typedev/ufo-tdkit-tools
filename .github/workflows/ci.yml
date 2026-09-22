@@ -14,14 +14,17 @@ jobs:
   test:
     name: ${{ matrix.os }} · py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Same quoting on every OS (Git Bash on Windows) rather than PowerShell there.
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        # The floor from `requires-python` and the current release. The e2e suite shells
-        # out to AFDKO's `tx` / `makeotf`, whose wheels are platform-specific, so both
-        # Unix platforms run it. Windows is not in the matrix yet: the tool-path fallback
-        # in `compilation/compiler.py` does not append `.exe`.
-        os: [ubuntu-latest, macos-latest]
+        # The floor from `requires-python` and the current release, on all three
+        # platforms: the e2e suite shells out to AFDKO's `tx` / `makeotf`, whose wheels
+        # are platform-specific (on Windows they are `.exe` files in `Scripts\`).
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.10", "3.13"]
 
     steps:

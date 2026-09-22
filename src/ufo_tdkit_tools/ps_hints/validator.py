@@ -65,9 +65,7 @@ def validate_ps_hints(ufo_path, logger=None):
 
         # E2: hintSetList must be present and a list
         if hint_set_list is None or not isinstance(hint_set_list, list):
-            errors.append(
-                {"glyph": glyph_name, "message": "hintSetList missing or not a list"}
-            )
+            errors.append({"glyph": glyph_name, "message": "hintSetList missing or not a list"})
             continue
 
         # E3: hintSetList must not be empty
@@ -85,9 +83,7 @@ def validate_ps_hints(ufo_path, logger=None):
 
             # W2: pointTag should be present
             if "pointTag" not in hint_set:
-                warnings.append(
-                    {"glyph": glyph_name, "message": f"{prefix}: missing pointTag"}
-                )
+                warnings.append({"glyph": glyph_name, "message": f"{prefix}: missing pointTag"})
 
             stems = hint_set.get("stems")
 
@@ -172,8 +168,7 @@ def validate_ps_hints(ufo_path, logger=None):
                         {
                             "glyph": glyph_name,
                             "message": (
-                                f"{prefix}.stems[{si}]: zero-width stem "
-                                f"({cmd} {params[0]} 0)"
+                                f"{prefix}.stems[{si}]: zero-width stem ({cmd} {params[0]} 0)"
                             ),
                         }
                     )

@@ -40,6 +40,7 @@ def __getattr__(name):
         return getattr(preserve, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
+
 __all__ = [
     "add_legacy_kern",
     "build_kern_table",

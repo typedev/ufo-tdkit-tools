@@ -116,9 +116,7 @@ def flatten_gpos_kern(font) -> dict[tuple[str, str], int]:
                 lookup_type = getattr(st, "ExtensionLookupType", None)
                 st = getattr(st, "ExtSubTable", None)
             if lookup_type != 2 or st is None:  # 2 == PairPos
-                logger.debug(
-                    "kern feature: skipping non-PairPos lookup (type %s)", lookup_type
-                )
+                logger.debug("kern feature: skipping non-PairPos lookup (type %s)", lookup_type)
                 skipped.add(li)
                 continue
             yield st
@@ -165,7 +163,8 @@ def flatten_gpos_kern(font) -> dict[tuple[str, str], int]:
         logger.info(
             "kern feature: %d of %d lookup(s) are not pair positioning and have no "
             "format-0 equivalent; their kerning is not in the legacy table",
-            len(skipped), len(kern_lookups),
+            len(skipped),
+            len(kern_lookups),
         )
     return pairs
 
@@ -218,7 +217,8 @@ def build_kern_table(pairs: dict[tuple[str, str], int]):
     if len(items) > _MAX_PAIRS_PER_SUBTABLE:
         logger.warning(
             "%d kern pairs split across %d format-0 subtables",
-            len(items), len(kern.kernTables),
+            len(items),
+            len(kern.kernTables),
         )
     return kern
 

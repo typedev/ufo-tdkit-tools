@@ -173,9 +173,7 @@ def process_font(
         # Glyphs the source does not cover. A partially hinted source is the
         # norm for hand-hinted masters, so this is a per-glyph question, not a
         # whole-font one.
-        missing = (
-            glyphs_missing_source(font, source) if autohint != "off" else []
-        )
+        missing = glyphs_missing_source(font, source) if autohint != "off" else []
 
         glyphs_total = len(font)
         glyphs_with_hints = count_glyphs_with_source(font, source) if source else 0
@@ -198,21 +196,14 @@ def process_font(
             if missing:
                 font = _autohint_glyphs(font, missing, log)
                 autohinted = True
-                still_missing = set(
-                    glyphs_missing_source(font, HintSource.PROCESSED_LAYER)
-                )
+                still_missing = set(glyphs_missing_source(font, HintSource.PROCESSED_LAYER))
                 autohinted_count = sum(1 for n in missing if n not in still_missing)
-                log.info(
-                    f"pipeline: autohinted {autohinted_count}/{len(missing)} "
-                    "unhinted glyphs"
-                )
+                log.info(f"pipeline: autohinted {autohinted_count}/{len(missing)} unhinted glyphs")
 
             if optimize:
                 stats = optimize_font(font)
                 optimized_count = stats["optimized"]
-                log.info(
-                    f"pipeline: optimized={stats['optimized']} skipped={stats['skipped']}"
-                )
+                log.info(f"pipeline: optimized={stats['optimized']} skipped={stats['skipped']}")
             export_all_from_processed(font, "v2")
         elif source == HintSource.PROCESSED_LAYER:
             export_all_from_processed(font, "v2")

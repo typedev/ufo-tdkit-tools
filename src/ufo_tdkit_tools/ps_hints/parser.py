@@ -391,9 +391,7 @@ def _parse_from_default_layer(glyph, lib_key: str) -> PSHintData:
         return PSHintData(source=source, errors=["No hint data found"])
 
     point_map = build_point_map(glyph)
-    hint_sets, flex_points, errors, id_hash, fmt_ver = _parse_hint_dict(
-        hint_dict, point_map
-    )
+    hint_sets, flex_points, errors, id_hash, fmt_ver = _parse_hint_dict(hint_dict, point_map)
 
     # Check staleness
     is_stale = False
@@ -444,9 +442,7 @@ def _parse_from_processed_layer(glyph, font) -> PSHintData:
     # Build point map from the processed glyph (it has hintRef names)
     point_map = build_point_map(processed_glyph)
 
-    hint_sets, flex_points, errors, id_hash, fmt_ver = _parse_hint_dict(
-        hint_dict, point_map
-    )
+    hint_sets, flex_points, errors, id_hash, fmt_ver = _parse_hint_dict(hint_dict, point_map)
 
     # Staleness check: compare id against the processed glyph outline
     is_stale = False

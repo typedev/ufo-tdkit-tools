@@ -135,11 +135,7 @@ def _compile_makeotf_hinted(
     venv_bin = os.path.dirname(sys.executable)
 
     tx_bin = tx_path or shutil.which("tx") or os.path.join(venv_bin, "tx")
-    makeotf_bin = (
-        makeotf_path
-        or shutil.which("makeotf")
-        or os.path.join(venv_bin, "makeotf")
-    )
+    makeotf_bin = makeotf_path or shutil.which("makeotf") or os.path.join(venv_bin, "makeotf")
 
     if not os.path.isfile(tx_bin) or not os.path.isfile(makeotf_bin):
         if logger:
@@ -320,9 +316,7 @@ def _finalize_shell(shell, ufo, otf_path, subroutinize, logger=None):
 
         # useProductionNames=None: reproduce compileOTF's default decision from
         # the UFO lib (public.postscriptNames / useProductionNames / keepGlyphNames).
-        shell = PostProcessor(shell, ufo).process(
-            useProductionNames=None, optimizeCFF=subroutinize
-        )
+        shell = PostProcessor(shell, ufo).process(useProductionNames=None, optimizeCFF=subroutinize)
     except Exception as e:
         # Never lose the font over a post-processing hiccup: fall back to the
         # documented lib mapping plus a direct cffsubr call.
@@ -361,8 +355,7 @@ def _rename_glyphs_fallback(shell, ufo, logger=None):
 
 
 def compile_otf_preserve(
-    ufo_path, otf_path, logger=None, pshash_rebuild=False,
-    tx_path=None, makeotf_path=None
+    ufo_path, otf_path, logger=None, pshash_rebuild=False, tx_path=None, makeotf_path=None
 ):
     """Compile OTF preserving PS hints from UFO.
 
@@ -391,8 +384,13 @@ def compile_otf_preserve(
 
 
 def compile_otf_preserve_optimized(
-    ufo_path, otf_path, logger=None, pshash_rebuild=False,
-    tx_path=None, makeotf_path=None, stats=None
+    ufo_path,
+    otf_path,
+    logger=None,
+    pshash_rebuild=False,
+    tx_path=None,
+    makeotf_path=None,
+    stats=None,
 ):
     """Compile OTF preserving PS hints using per-glyph charstring merge.
 
@@ -422,9 +420,18 @@ def compile_otf_preserve_optimized(
         True on success, False on failure
     """
     PRIVATE_HINT_ATTRS = [
-        "BlueValues", "OtherBlues", "FamilyBlues", "FamilyOtherBlues",
-        "BlueScale", "BlueShift", "BlueFuzz",
-        "StdHW", "StdVW", "StemSnapH", "StemSnapV", "ForceBold",
+        "BlueValues",
+        "OtherBlues",
+        "FamilyBlues",
+        "FamilyOtherBlues",
+        "BlueScale",
+        "BlueShift",
+        "BlueFuzz",
+        "StdHW",
+        "StdVW",
+        "StemSnapH",
+        "StemSnapV",
+        "ForceBold",
     ]
 
     temp_dir = tempfile.mkdtemp(prefix="tdkit_preserve_opt_")
@@ -452,16 +459,12 @@ def compile_otf_preserve_optimized(
                 for err in hint_report["errors"][:10]:
                     logger.error(f"  Hint error in '{err['glyph']}': {err['message']}")
                 if len(hint_report["errors"]) > 10:
-                    logger.error(
-                        f"  ... and {len(hint_report['errors']) - 10} more error(s)"
-                    )
+                    logger.error(f"  ... and {len(hint_report['errors']) - 10} more error(s)")
         if hint_report["warnings"] and logger:
             for warn in hint_report["warnings"][:5]:
                 logger.warning(f"  Hint warning in '{warn['glyph']}': {warn['message']}")
             if len(hint_report["warnings"]) > 5:
-                logger.warning(
-                    f"  ... and {len(hint_report['warnings']) - 5} more warning(s)"
-                )
+                logger.warning(f"  ... and {len(hint_report['warnings']) - 5} more warning(s)")
 
         # Note: no processedglyphs layer is built here. tx -t1 reads hints
         # directly from com.adobe.type.autohint.v2 in the default layer's glyph.lib.
@@ -474,8 +477,12 @@ def compile_otf_preserve_optimized(
             logger.info("Preserve-optimized: compiling makeotf (no subroutinization)")
         makeotf_args = ["-nS", "-f", ufo_path, "-o", hinted_path]
         if not _compile_makeotf_hinted(
-            ufo_path, hinted_path, makeotf_args, logger,
-            tx_path=tx_path, makeotf_path=makeotf_path,
+            ufo_path,
+            hinted_path,
+            makeotf_args,
+            logger,
+            tx_path=tx_path,
+            makeotf_path=makeotf_path,
         ):
             if logger:
                 logger.error("makeotf compilation failed in preserve-optimized mode")
@@ -512,8 +519,7 @@ def compile_otf_preserve_optimized(
             hinted_charstring = hinted_cs[glyph_name]
             hinted_charstring.decompile()
             has_hints = any(
-                isinstance(op, str) and op in HINT_OPS
-                for op in hinted_charstring.program
+                isinstance(op, str) and op in HINT_OPS for op in hinted_charstring.program
             )
             if has_hints:
                 donor_hinted += 1
@@ -545,9 +551,7 @@ def compile_otf_preserve_optimized(
                 continue
             charstring = hinted_cs[glyph_name]
             charstring.decompile()
-            if any(
-                isinstance(op, str) and op in HINT_OPS for op in charstring.program
-            ):
+            if any(isinstance(op, str) and op in HINT_OPS for op in charstring.program):
                 dropped += 1
         if dropped and logger:
             logger.warning(
@@ -577,19 +581,13 @@ def compile_otf_preserve_optimized(
                 )
             # Shell OTF is already a valid unhinted font -- it still needs its
             # production glyph names, which were deferred for the merge.
-            return _finalize_shell(
-                shell, shell_ufo, otf_path, subroutinize=False, logger=logger
-            )
+            return _finalize_shell(shell, shell_ufo, otf_path, subroutinize=False, logger=logger)
 
         # Step 5: Production glyph names + cffsubr subroutinization for ~38%
         # smaller CFF. Hints are preserved inside subroutines (callsubr/callgsubr).
         if logger:
-            logger.info(
-                "Preserve-optimized: applying production names and subroutinization"
-            )
-        saved = _finalize_shell(
-            shell, shell_ufo, otf_path, subroutinize=True, logger=logger
-        )
+            logger.info("Preserve-optimized: applying production names and subroutinization")
+        saved = _finalize_shell(shell, shell_ufo, otf_path, subroutinize=True, logger=logger)
 
         if logger and saved:
             logger.info(f"Preserve-optimized: saved hybrid OTF: {otf_path}")

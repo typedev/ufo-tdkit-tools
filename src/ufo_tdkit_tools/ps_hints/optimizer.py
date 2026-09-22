@@ -101,8 +101,7 @@ def optimize_hints(
     # MUST happen before vstem3 to prevent accent dots forming false triples.
     if coverage_map:
         all_vstems = _filter_small_element_vstems(all_vstems, coverage_map, glyph)
-        coverage_map = {s.raw: coverage_map[s.raw] for s in all_vstems
-                        if s.raw in coverage_map}
+        coverage_map = {s.raw: coverage_map[s.raw] for s in all_vstems if s.raw in coverage_map}
 
     # Step 5: Extract vstem3 candidates BEFORE overlap resolution
     all_vstems, new_triples = _extract_vstem3(all_vstems, stem_snap_v)
@@ -267,6 +266,7 @@ def _extract_segments(glyph) -> list[list[tuple[float, float]]]:
         try:
             from fontParts.world import RGlyph
             from fontTools.pens.recordingPen import DecomposingRecordingPen
+
             drp = DecomposingRecordingPen(glyph.font)
             glyph.draw(drp)
             temp = RGlyph()
@@ -356,9 +356,7 @@ def _collect_y_crossings(
     return y_crossings
 
 
-def _line_intersect_x(
-    pt1: tuple[float, float], pt2: tuple[float, float], x: float
-) -> float | None:
+def _line_intersect_x(pt1: tuple[float, float], pt2: tuple[float, float], x: float) -> float | None:
     """Find Y where a line segment crosses x=X."""
     x1, y1 = pt1
     x2, y2 = pt2
@@ -403,11 +401,7 @@ def _build_coverage_map(
 
 def _is_pua_codepoint(cp: int) -> bool:
     """Adobe Symbol Encoding maps some legacy glyph names to PUA codepoints."""
-    return (
-        0xE000 <= cp <= 0xF8FF
-        or 0xF0000 <= cp <= 0xFFFFD
-        or 0x100000 <= cp <= 0x10FFFD
-    )
+    return 0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0xFFFFD or 0x100000 <= cp <= 0x10FFFD
 
 
 def _resolve_glyph_codepoint(glyph) -> int | None:
@@ -428,6 +422,7 @@ def _resolve_glyph_codepoint(glyph) -> int | None:
     base_name = name.split(".", 1)[0]
     try:
         from fontTools import agl
+
         s = agl.toUnicode(base_name)
     except Exception:
         return None
@@ -448,14 +443,16 @@ _BELOW_CCC = frozenset({200, 202, 218, 220, 222, 233, 240})
 # so any hstem they produce is a real stem worth keeping. Other above/below
 # accents (acute, grave, dieresis, cedilla, ogonek) have no meaningful
 # hstem and stay subject to the zone filter.
-_BAR_ACCENTS = frozenset({
-    0x0304,  # COMBINING MACRON
-    0x0305,  # COMBINING OVERLINE
-    0x035E,  # COMBINING DOUBLE MACRON
-    0x0331,  # COMBINING MACRON BELOW
-    0x0332,  # COMBINING LOW LINE
-    0x035F,  # COMBINING DOUBLE MACRON BELOW
-})
+_BAR_ACCENTS = frozenset(
+    {
+        0x0304,  # COMBINING MACRON
+        0x0305,  # COMBINING OVERLINE
+        0x035E,  # COMBINING DOUBLE MACRON
+        0x0331,  # COMBINING MACRON BELOW
+        0x0332,  # COMBINING LOW LINE
+        0x035F,  # COMBINING DOUBLE MACRON BELOW
+    }
+)
 
 
 def _glyph_accent_info(glyph) -> tuple[set[str], set[str], int | None]:
@@ -508,19 +505,21 @@ def _glyph_accent_info(glyph) -> tuple[set[str], set[str], int | None]:
 # Using base.bounds.yMax would put the threshold above the accent — so for
 # these bases we use xHeight instead. Only lowercase entries; uppercase
 # variants (I, Ї, J, etc.) have no tittle and behave normally.
-_SOFT_DOTTED_BASE = frozenset({
-    0x0069,  # i  Latin small letter i
-    0x006A,  # j  Latin small letter j
-    0x012F,  # į  Latin small letter i with ogonek
-    0x0249,  # ɉ  Latin small letter j with stroke
-    0x0268,  # ɨ  Latin small letter i with stroke
-    0x029D,  # ʝ  Latin small letter j with crossed-tail
-    0x03F3,  # ϳ  Greek letter yot
-    0x0456,  # і  Cyrillic Byelorussian-Ukrainian i
-    0x0458,  # ј  Cyrillic je
-    0x1E2D,  # ḭ  Latin small letter i with tilde below
-    0x1ECB,  # ị  Latin small letter i with dot below
-})
+_SOFT_DOTTED_BASE = frozenset(
+    {
+        0x0069,  # i  Latin small letter i
+        0x006A,  # j  Latin small letter j
+        0x012F,  # į  Latin small letter i with ogonek
+        0x0249,  # ɉ  Latin small letter j with stroke
+        0x0268,  # ɨ  Latin small letter i with stroke
+        0x029D,  # ʝ  Latin small letter j with crossed-tail
+        0x03F3,  # ϳ  Greek letter yot
+        0x0456,  # і  Cyrillic Byelorussian-Ukrainian i
+        0x0458,  # ј  Cyrillic je
+        0x1E2D,  # ḭ  Latin small letter i with tilde below
+        0x1ECB,  # ị  Latin small letter i with dot below
+    }
+)
 
 
 def _accent_zone_bounds(
@@ -571,9 +570,8 @@ def _accent_zone_bounds(
                 below_y = bounds[1] - BUFFER
             # If both positions needed but bbox only covers one side, fall
             # through to fill the other via font metrics
-            if (
-                ("above" in positions) == (above_y is not None)
-                and ("below" in positions) == (below_y is not None)
+            if ("above" in positions) == (above_y is not None) and ("below" in positions) == (
+                below_y is not None
             ):
                 return above_y, below_y
 
@@ -619,6 +617,7 @@ def _flat_contour_points(glyph) -> list[tuple[float, float]]:
         elif glyph.components:
             from fontParts.world import RGlyph
             from fontTools.pens.recordingPen import DecomposingRecordingPen
+
             drp = DecomposingRecordingPen(glyph.font)
             glyph.draw(drp)
             temp = RGlyph()
@@ -654,8 +653,7 @@ def _vstem_edge_y_values(
     left_x = vstem.position
     right_x = vstem.position + vstem.width
     return [
-        y for (x, y) in points
-        if abs(x - left_x) <= x_tolerance or abs(x - right_x) <= x_tolerance
+        y for (x, y) in points if abs(x - left_x) <= x_tolerance or abs(x - right_x) <= x_tolerance
     ]
 
 
@@ -740,14 +738,8 @@ def _apply_accent_zone_filter(
             new_vstems.append(s)
             continue
 
-        in_above = (
-            above_y is not None
-            and all(y >= above_y - MARGIN_Y for y in edge_ys)
-        )
-        in_below = (
-            below_y is not None
-            and all(y <= below_y + MARGIN_Y for y in edge_ys)
-        )
+        in_above = above_y is not None and all(y >= above_y - MARGIN_Y for y in edge_ys)
+        in_below = below_y is not None and all(y <= below_y + MARGIN_Y for y in edge_ys)
         if in_above or in_below:
             logger.debug(f"Drop accent vstem {s.raw}")
             continue
@@ -1208,8 +1200,9 @@ def _resolve_overlaps_left(
     if len(stems) <= 1:
         return stems
     stems = sorted(stems, key=lambda s: s.position)
-    return _resolve_overlap_groups(stems, keep="leftmost", stem_snap=stem_snap_v,
-                                   coverage_map=coverage_map)
+    return _resolve_overlap_groups(
+        stems, keep="leftmost", stem_snap=stem_snap_v, coverage_map=coverage_map
+    )
 
 
 def _resolve_overlaps_right(
@@ -1221,8 +1214,9 @@ def _resolve_overlaps_right(
     if len(stems) <= 1:
         return stems
     stems = sorted(stems, key=lambda s: s.position)
-    return _resolve_overlap_groups(stems, keep="rightmost", stem_snap=stem_snap_v,
-                                   coverage_map=coverage_map)
+    return _resolve_overlap_groups(
+        stems, keep="rightmost", stem_snap=stem_snap_v, coverage_map=coverage_map
+    )
 
 
 def _has_mixed_widths(group: list[PSHint]) -> bool:

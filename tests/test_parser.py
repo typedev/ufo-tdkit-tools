@@ -93,14 +93,18 @@ class TestPSHintData:
         data = PSHintData(
             source=HintSource.AUTOHINT_V2,
             hint_sets=[
-                PSHintSet(stems=[
-                    PSHint(type="hstem", position=0, width=50, raw="hstem 0 50"),
-                    PSHint(type="vstem", position=100, width=18, raw="vstem 100 18"),
-                ]),
-                PSHintSet(stems=[
-                    PSHint(type="hstem", position=0, width=50, raw="hstem 0 50"),  # dup
-                    PSHint(type="vstem", position=200, width=20, raw="vstem 200 20"),
-                ]),
+                PSHintSet(
+                    stems=[
+                        PSHint(type="hstem", position=0, width=50, raw="hstem 0 50"),
+                        PSHint(type="vstem", position=100, width=18, raw="vstem 100 18"),
+                    ]
+                ),
+                PSHintSet(
+                    stems=[
+                        PSHint(type="hstem", position=0, width=50, raw="hstem 0 50"),  # dup
+                        PSHint(type="vstem", position=200, width=20, raw="vstem 200 20"),
+                    ]
+                ),
             ],
         )
         assert data.total_stems == 3  # 3 unique

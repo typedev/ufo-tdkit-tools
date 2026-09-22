@@ -67,9 +67,7 @@ class BatchCompileResult:
                 {
                     "ufo": r.ufo_path,
                     "otf": r.otf_path,
-                    "status": (
-                        "ok" if r.success else ("skipped" if r.skipped else "error")
-                    ),
+                    "status": ("ok" if r.success else ("skipped" if r.skipped else "error")),
                     "error": r.error,
                     "warnings": r.warnings,
                     "hints_found": r.hints_found,
@@ -167,8 +165,11 @@ def _worker_compile(args: tuple) -> PreserveCompileResult:
     ufo_path, otf_path, tx_path, makeotf_path = args
     logger = logging.getLogger(f"ufo_tdkit_tools.preserve.{os.path.basename(ufo_path)}")
     return preserve_compile(
-        ufo_path, otf_path, logger=logger,
-        tx_path=tx_path, makeotf_path=makeotf_path,
+        ufo_path,
+        otf_path,
+        logger=logger,
+        tx_path=tx_path,
+        makeotf_path=makeotf_path,
     )
 
 
@@ -221,33 +222,26 @@ def preserve_compile_batch(
             workers = max(1, cpu - 2) if cpu > 4 else cpu
 
         with ProcessPoolExecutor(max_workers=workers) as executor:
-            futures = {
-                executor.submit(_worker_compile, task): task[0] for task in tasks
-            }
+            futures = {executor.submit(_worker_compile, task): task[0] for task in tasks}
             for future in as_completed(futures):
                 result = future.result()
                 batch.results.append(result)
                 if on_progress:
-                    status = (
-                        "ok"
-                        if result.success
-                        else ("skipped" if result.skipped else "error")
-                    )
+                    status = "ok" if result.success else ("skipped" if result.skipped else "error")
                     on_progress(os.path.basename(result.ufo_path), status)
     else:
         for task in tasks:
             ufo_path, otf_path, _tx, _mko = task
             result = preserve_compile(
-                ufo_path, otf_path, logger=logger,
-                tx_path=_tx, makeotf_path=_mko,
+                ufo_path,
+                otf_path,
+                logger=logger,
+                tx_path=_tx,
+                makeotf_path=_mko,
             )
             batch.results.append(result)
             if on_progress:
-                status = (
-                    "ok"
-                    if result.success
-                    else ("skipped" if result.skipped else "error")
-                )
+                status = "ok" if result.success else ("skipped" if result.skipped else "error")
                 on_progress(os.path.basename(result.ufo_path), status)
 
     return batch

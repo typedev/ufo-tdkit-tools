@@ -201,7 +201,7 @@ class TestInlineAaltLookups:
         """)
         out = _inline_aalt_lookups(fea)
         # aalt now has the sub statements directly
-        aalt_section = out[out.index("feature aalt"):out.index("} aalt;")]
+        aalt_section = out[out.index("feature aalt") : out.index("} aalt;")]
         assert "sub a by a.alt" in aalt_section
         assert "sub b by b.alt" in aalt_section
         assert "lookup L1;" not in aalt_section
@@ -220,7 +220,7 @@ class TestInlineAaltLookups:
             } aalt;
         """)
         out = _inline_aalt_lookups(fea)
-        aalt_section = out[out.index("feature aalt"):out.index("} aalt;")]
+        aalt_section = out[out.index("feature aalt") : out.index("} aalt;")]
         assert "sub one from [onesuperior one.alt]" in aalt_section
         assert "sub two from [twosuperior two.alt]" in aalt_section
 
@@ -239,7 +239,7 @@ class TestInlineAaltLookups:
             } aalt;
         """)
         out = _inline_aalt_lookups(fea)
-        aalt_section = out[out.index("feature aalt"):out.index("} aalt;")]
+        aalt_section = out[out.index("feature aalt") : out.index("} aalt;")]
         assert "sub a by a.alt" in aalt_section
         assert "sub one from [onesuperior one.alt]" in aalt_section
 

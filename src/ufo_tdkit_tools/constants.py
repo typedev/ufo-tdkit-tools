@@ -60,9 +60,7 @@ def compute_outline_hash(glyph) -> str:
         for point in contour.points:
             ptype = point.type or ""
             type_char = ptype[0] if ptype and ptype != "offcurve" else ""
-            data_parts.append(
-                f"{type_char}{_norm_float(point.x)}{_norm_float(point.y)}"
-            )
+            data_parts.append(f"{type_char}{_norm_float(point.x)}{_norm_float(point.y)}")
 
     # Components
     for comp in glyph.components:

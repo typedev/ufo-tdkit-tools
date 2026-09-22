@@ -93,14 +93,18 @@ class TestComputeOutlineHash:
         assert "l00" in h  # line point at (0,0)
 
     def test_deterministic(self):
-        h1 = compute_outline_hash(self._make_mock_glyph(
-            width=600,
-            points=[(10, 20, "curve"), (30, 40, "offcurve")],
-        ))
-        h2 = compute_outline_hash(self._make_mock_glyph(
-            width=600,
-            points=[(10, 20, "curve"), (30, 40, "offcurve")],
-        ))
+        h1 = compute_outline_hash(
+            self._make_mock_glyph(
+                width=600,
+                points=[(10, 20, "curve"), (30, 40, "offcurve")],
+            )
+        )
+        h2 = compute_outline_hash(
+            self._make_mock_glyph(
+                width=600,
+                points=[(10, 20, "curve"), (30, 40, "offcurve")],
+            )
+        )
         assert h1 == h2
 
     def test_none_width(self):

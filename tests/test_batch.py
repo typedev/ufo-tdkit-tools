@@ -164,15 +164,11 @@ class TestGlyphsMissingSource:
 
     def test_empty_glyphs_are_skipped(self):
         # 'space' has neither contours nor components -- nothing to hint
-        font = _FakeFont(
-            glyphs=[_FakeGlyph("space", contours=0), _FakeGlyph("b")]
-        )
+        font = _FakeFont(glyphs=[_FakeGlyph("space", contours=0), _FakeGlyph("b")])
         assert glyphs_missing_source(font, HintSource.AUTOHINT_V2) == ["b"]
 
     def test_composite_without_contours_is_included(self):
-        font = _FakeFont(
-            glyphs=[_FakeGlyph("Aacute", contours=0, components=["A", "acute"])]
-        )
+        font = _FakeFont(glyphs=[_FakeGlyph("Aacute", contours=0, components=["A", "acute"])])
         assert glyphs_missing_source(font, HintSource.AUTOHINT_V2) == ["Aacute"]
 
     def test_none_source_means_everything_is_missing(self):

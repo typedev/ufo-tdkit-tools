@@ -51,8 +51,11 @@ class TestDecodeActiveStems:
         masks = [[True, True, True], [True, False, True]]
         out = _decode_active_stems(masks, hstems, vstems)
         assert out == [
-            "hstem 0 78", "hstem 319 78", "hstem 613 77",
-            "vstem 85 86", "vstem 470 86",
+            "hstem 0 78",
+            "hstem 319 78",
+            "hstem 613 77",
+            "vstem 85 86",
+            "vstem 470 86",
         ]
 
     def test_h_mask_only(self):

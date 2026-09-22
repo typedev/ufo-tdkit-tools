@@ -174,9 +174,7 @@ def _build_hint_set_list(gd, ufo_glyph) -> list[dict[str, Any]]:
     entry; the entry's ``pointTag`` references the UFO point at which
     that hint set becomes active.
     """
-    used_names: set[str] = {
-        p.name for c in ufo_glyph for p in c.points if p.name
-    }
+    used_names: set[str] = {p.name for c in ufo_glyph for p in c.points if p.name}
     counter = [0]
     hint_set_list: list[dict[str, Any]] = []
 
@@ -190,12 +188,12 @@ def _build_hint_set_list(gd, ufo_glyph) -> list[dict[str, Any]]:
             wrap_pt.name = _allocate_hint_ref(used_names, counter)
         else:
             used_names.add(wrap_pt.name)
-        hint_set_list.append({
-            "pointTag": wrap_pt.name,
-            "stems": _decode_active_stems(
-                gd.startmasks, gd.hstems, gd.vstems, gd.cntr
-            ),
-        })
+        hint_set_list.append(
+            {
+                "pointTag": wrap_pt.name,
+                "stems": _decode_active_stems(gd.startmasks, gd.hstems, gd.vstems, gd.cntr),
+            }
+        )
 
     for sp_idx, subpath in enumerate(gd.subpaths):
         if sp_idx >= len(ufo_glyph):
@@ -214,12 +212,12 @@ def _build_hint_set_list(gd, ufo_glyph) -> list[dict[str, Any]]:
                 pt.name = _allocate_hint_ref(used_names, counter)
             else:
                 used_names.add(pt.name)
-            hint_set_list.append({
-                "pointTag": pt.name,
-                "stems": _decode_active_stems(
-                    pe.masks, gd.hstems, gd.vstems, gd.cntr
-                ),
-            })
+            hint_set_list.append(
+                {
+                    "pointTag": pt.name,
+                    "stems": _decode_active_stems(pe.masks, gd.hstems, gd.vstems, gd.cntr),
+                }
+            )
 
     return hint_set_list
 
@@ -261,9 +259,7 @@ def _build_hint_dict(
     if not hint_set_list:
         # Hints exist but we couldn't anchor them (degenerate outline).
         # Fall back to a single entry without pointTag.
-        all_stems = [
-            _format_stem("hstem", *s.UFOVals()) for s in gd.hstems
-        ] + [
+        all_stems = [_format_stem("hstem", *s.UFOVals()) for s in gd.hstems] + [
             _format_stem("vstem", *s.UFOVals()) for s in gd.vstems
         ]
         if not all_stems:
@@ -359,9 +355,7 @@ def extract_cff_hints(
 
         # Build the hint dict (parses charstring via afdko.otfautohint)
         try:
-            hint_dict = _build_hint_dict(
-                glyph_name, charstring, ufo_glyph, outline_hash
-            )
+            hint_dict = _build_hint_dict(glyph_name, charstring, ufo_glyph, outline_hash)
         except Exception as e:
             error_count += 1
             if error_count <= 5:

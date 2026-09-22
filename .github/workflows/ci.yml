@@ -42,7 +42,9 @@ jobs:
         run: uv sync --frozen
 
       - name: Lint
-        run: uv run ruff check src/ tests/
+        run: |
+          uv run ruff check src/ tests/
+          uv run ruff format --check src/ tests/
 
       - name: Test
         # `uv run` puts .venv/bin on PATH, which is where afdko installs `tx` and `makeotf`;

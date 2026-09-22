@@ -9,7 +9,7 @@ ufo-tdkit-tools is a Python library for PostScript hints extraction, optimizatio
 ## Commands
 
 ```bash
-uv sync                                          # Install all deps (including dev)
+uv sync                                          # Install all deps (extras + dev group)
 uv run pytest tests/ -v                          # Run all tests
 uv run pytest tests/test_parser.py::TestParseStem -v  # Run a specific test class
 uv run ruff check src/ tests/                    # Lint

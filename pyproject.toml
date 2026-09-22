@@ -48,7 +48,10 @@ compilation = [
 all = [
     "ufo-tdkit-tools[extraction,compilation]",
 ]
+
+[dependency-groups]
 dev = [
+    "ufo-tdkit-tools[all]",
     "pytest>=7.0",
     "ruff>=0.1",
 ]

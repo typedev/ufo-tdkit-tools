@@ -268,7 +268,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -782,16 +782,19 @@ compilation = [
     { name = "fontparts" },
     { name = "ufo2ft" },
 ]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-]
 extraction = [
     { name = "afdko" },
     { name = "defcon" },
     { name = "fontparts" },
     { name = "typing-extensions" },
     { name = "ufo-extractor" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "ufo-tdkit-tools", extra = ["all"] },
 ]
 
 [package.metadata]
@@ -804,14 +807,19 @@ requires-dist = [
     { name = "fontparts", marker = "extra == 'compilation'", specifier = ">=0.10.0" },
     { name = "fontparts", marker = "extra == 'extraction'", specifier = ">=0.10.0" },
     { name = "fonttools", specifier = ">=4.38.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1" },
     { name = "typing-extensions", marker = "extra == 'extraction'", specifier = ">=4.15.0" },
     { name = "ufo-extractor", marker = "extra == 'extraction'", specifier = ">=0.8.1" },
     { name = "ufo-tdkit-tools", extras = ["extraction", "compilation"], marker = "extra == 'all'" },
     { name = "ufo2ft", marker = "extra == 'compilation'", specifier = ">=3.0.0" },
 ]
-provides-extras = ["extraction", "compilation", "all", "dev"]
+provides-extras = ["extraction", "compilation", "all"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "ruff", specifier = ">=0.1" },
+    { name = "ufo-tdkit-tools", extras = ["all"] },
+]
 
 [[package]]
 name = "ufo2ft"

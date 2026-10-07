@@ -6,12 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-07
+
 ### Fixed
 
 - **Compilation could not find `tx` / `makeotf` on Windows when they were not on `PATH`.** The last-resort lookup next to `sys.executable` joined a bare `tx` / `makeotf`, which never exists on Windows — the venv has `tx.exe` / `makeotf.exe` in `Scripts\`. It now goes through `shutil.which(name, path=venv_bin)`, so `PATHEXT` applies. Callers that pass `tx_path` / `makeotf_path`, or have the tools on `PATH`, were unaffected.
+- **The optimizer dropped every vstem when `postscriptStemSnapV` was zero-padded.** FontLab pads the stem snap arrays with zeros; each 0 counted as a snap value with a `[0, 5]` tolerance window, so an all-zero `postscriptStemSnapV` filtered out all vstems in the font. Non-positive snap values are now ignored.
+- **Zero-padded stem snaps shipped as `StdVW 0` and lost `StemSnapH/V`.** `process_font` now cleans `postscriptStemSnapH/V` right after loading: values `<= 0` and repeats are dropped, order is kept (ufo2ft takes `StdHW`/`StdVW` from index 0), and the list is capped at 12. A list with nothing left is unset. Before, a FontLab-padded `[54, 74, 0, …]` reached ufo2ft as `StemSnapV [0, 0, …, 54, 74]`, and the final `cffsubr` pass — which rebuilds the CFF through `tx` — dropped both arrays from the Private dict; an all-zero list became `StdVW 0`.
+- **Exporting hints from processedglyphs could start a hint set at the wrong point.** The autohinter renames the processed glyph's points from scratch, while the default glyph may still carry a `hintRef` name from an earlier run on a different point; the export trusted the name, so the set began mid-glyph and every contour drawn before it was left unhinted (an empty initial `hintmask` — the tittle of `i`/`j`, `colon`, `exclam`, …). `pointTag` and `flexList` names are now carried over by point position, in both export and import.
 
 ### Changed
 
+- **The optimizer removes tittle hints from bare soft-dotted glyphs** (`i`, `j`, `і`, `ј`, `ĳ`, `į`, `ị` and suffixed variants), as it already did for `idieresis` and other accented forms: an hstem on the tittle makes the dot stick to the body at small ppem. Glyphs without a contour entirely above xHeight (e.g. a small-cap `i.sc`) are left alone.
 - CI runs on Windows as well as Linux and macOS, and checks `ruff format`; the whole tree was reformatted once (no behaviour change).
 
 ## [0.2.0] - 2026-09-22
@@ -61,5 +67,6 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/typedev/ufo-tdkit-tools/releases/tag/v0.2.0

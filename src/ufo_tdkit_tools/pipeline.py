@@ -139,6 +139,7 @@ def process_font(
     font = None
     try:
         font, extract_temp = _load_input(input_path, work_dir.name, is_binary)
+        _clean_stem_snaps(font, log)
 
         from ufo_tdkit_tools.ps_hints.batch import (
             count_glyphs_with_source,
@@ -293,6 +294,34 @@ def _load_input(input_path: Path, work_dir: str, is_binary: bool):
     shutil.copytree(input_path, work_ufo)
     font = fp.OpenFont(str(work_ufo), showInterface=False)
     return font, None
+
+
+def _clean_stem_snaps(font, log: logging.Logger) -> None:
+    """Drop placeholder values from ``postscriptStemSnapH/V``.
+
+    FontLab pads the stem snap arrays with zeros (and repeats values). ufo2ft
+    takes ``StdHW``/``StdVW`` from the first element, so a leading 0 ships as
+    ``StdVW 0``; and the final ``cffsubr`` pass rebuilds the CFF through
+    ``tx``, which silently drops a ``StemSnapH/V`` array containing zeros.
+    Values ``<= 0`` and repeats are removed, order is kept (index 0 is the
+    StdHW/StdVW pick), and the CFF limit of 12 entries is applied. A list
+    left empty becomes ``None``: no stem parameters is better than wrong ones.
+    """
+    info = font.info
+    for attr in ("postscriptStemSnapH", "postscriptStemSnapV"):
+        values = getattr(info, attr)
+        if not values:
+            continue
+        cleaned: list = []
+        for v in values:
+            if v > 0 and v not in cleaned:
+                cleaned.append(v)
+        cleaned = cleaned[:12]
+        if cleaned != list(values):
+            setattr(info, attr, cleaned or None)
+            log.info(f"pipeline: {attr} {list(values)} -> {cleaned or None}")
+            if not cleaned:
+                log.warning(f"pipeline: {attr} held no usable values; left unset")
 
 
 def _autohint_glyphs(font, glyph_names: list[str], log: logging.Logger):

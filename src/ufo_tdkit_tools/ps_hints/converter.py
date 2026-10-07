@@ -98,6 +98,13 @@ def import_to_processed(glyph, font, source: str) -> bool:
     if not isinstance(hint_set_list, list):
         return False
 
+    flex_list = source_hints.get("flexList")
+    flex_list = list(flex_list) if flex_list and isinstance(flex_list, list) else []
+
+    # The names were stripped above, so carry each tag over to the point it
+    # names in the default glyph -- assigning tags in on-curve order would move
+    # every substitution point after the first.
+    hint_set_list, flex_list = _remap_point_tags(glyph, processed_glyph, hint_set_list, flex_list)
     new_hint_set_list, _ = _fix_point_tags(processed_glyph, hint_set_list)
 
     new_hints: dict[str, Any] = {}
@@ -105,9 +112,8 @@ def import_to_processed(glyph, font, source: str) -> bool:
         new_hints["formatVersion"] = source_hints["formatVersion"]
     new_hints["hintSetList"] = new_hint_set_list
 
-    flex_list = source_hints.get("flexList")
-    if flex_list and isinstance(flex_list, list):
-        new_hints["flexList"] = list(flex_list)
+    if flex_list:
+        new_hints["flexList"] = flex_list
 
     new_hints["id"] = compute_outline_hash(processed_glyph)
 
@@ -155,20 +161,23 @@ def export_from_processed(glyph, font, target: str) -> bool:
     if "formatVersion" in source_hints:
         new_hints["formatVersion"] = source_hints["formatVersion"]
 
-    # Copy hintSetList
+    # Point names are per layer: the autohinter renames the processed glyph's
+    # points from scratch, while the default glyph may still carry names from
+    # an earlier run on other points. Resolve tags by position, not by name --
+    # a stale match starts the hint set mid-glyph and leaves the contours
+    # drawn before it unhinted (an empty initial hintmask).
     hint_set_list = source_hints.get("hintSetList", [])
-    if target == "public_ps":
-        # For public.postscript.hints: fix pointTags on the DEFAULT layer glyph
-        new_hint_set_list, _ = _fix_point_tags(glyph, copy.deepcopy(hint_set_list))
-    else:
-        # For v2 in default layer: same fix
-        new_hint_set_list, _ = _fix_point_tags(glyph, copy.deepcopy(hint_set_list))
+    flex_list = source_hints.get("flexList")
+    flex_list = list(flex_list) if flex_list and isinstance(flex_list, list) else []
+    hint_set_list, flex_list = _remap_point_tags(
+        processed_glyph, glyph, copy.deepcopy(hint_set_list), flex_list
+    )
+    new_hint_set_list, _ = _fix_point_tags(glyph, hint_set_list)
 
     new_hints["hintSetList"] = new_hint_set_list
 
-    flex_list = source_hints.get("flexList")
-    if flex_list and isinstance(flex_list, list):
-        new_hints["flexList"] = list(flex_list)
+    if flex_list:
+        new_hints["flexList"] = flex_list
 
     # Compute id from default layer glyph outline
     new_hints["id"] = compute_outline_hash(glyph)
@@ -231,6 +240,69 @@ def remove_hints(glyph, font, source: str) -> bool:
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+
+def _remap_point_tags(
+    src_glyph,
+    dst_glyph,
+    hint_set_list: list,
+    flex_list: list[str],
+) -> tuple[list, list[str]]:
+    """Rewrite point names so they address the same points in ``dst_glyph``.
+
+    Each name is looked up in ``src_glyph`` and resolved to its (contour,
+    point) index. The point at that index in ``dst_glyph`` keeps its own name
+    if it has one; otherwise it receives the source name, or a fresh
+    ``hintRef`` name when the source name is already taken by another point
+    of ``dst_glyph``. Names that do not resolve -- unknown in the source, or
+    the outlines differ in structure -- are left as they are for
+    :func:`_fix_point_tags`.
+
+    Args:
+        src_glyph: Glyph whose point names the hint data refers to.
+        dst_glyph: Glyph the hint data is moving to (point names may be added).
+        hint_set_list: ``hintSetList`` entries (dicts are copied, not mutated).
+        flex_list: ``flexList`` point names.
+
+    Returns:
+        (new_hint_set_list, new_flex_list)
+    """
+    src_index: dict[str, tuple[int, int]] = {}
+    for ci, contour in enumerate(src_glyph.contours):
+        for pi, point in enumerate(contour.points):
+            if point.name and point.name not in src_index:
+                src_index[point.name] = (ci, pi)
+
+    dst_contours = [list(c.points) for c in dst_glyph.contours]
+    existing = {p.name for pts in dst_contours for p in pts if p.name}
+    resolved: dict[str, str] = {}
+
+    def resolve(name: str) -> str:
+        if name in resolved:
+            return resolved[name]
+        loc = src_index.get(name)
+        if loc is None or loc[0] >= len(dst_contours) or loc[1] >= len(dst_contours[loc[0]]):
+            return name
+        point = dst_contours[loc[0]][loc[1]]
+        if not point.name:
+            new_name = name
+            counter = 0
+            while new_name in existing:
+                new_name = HINT_REF_PATTERN % counter
+                counter += 1
+            point.name = new_name
+            existing.add(new_name)
+        resolved[name] = point.name
+        return point.name
+
+    new_list = []
+    for hs in hint_set_list:
+        if isinstance(hs, dict) and hs.get("pointTag"):
+            hs = dict(hs)
+            hs["pointTag"] = resolve(hs["pointTag"])
+        new_list.append(hs)
+    new_flex = [resolve(n) if isinstance(n, str) else n for n in flex_list]
+    return new_list, new_flex
 
 
 def _fix_point_tags(

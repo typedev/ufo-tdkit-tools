@@ -66,6 +66,12 @@ def optimize_hints(
     if not hint_data.hint_sets:
         return hint_data
 
+    # FontLab pads postscriptStemSnapH/V with zeros up to the array's maximum
+    # length. A 0 is not a snap value: kept, it gives a [0, 5] tolerance
+    # window, and an all-zero list filters out every vstem in Step 1.
+    stem_snap_v = [v for v in stem_snap_v or [] if v > 0] or None
+    stem_snap_h = [v for v in stem_snap_h or [] if v > 0] or None
+
     # Collect all unique stems across hint sets
     all_vstems = _collect_unique_stems(hint_data, vertical=True)
     all_hstems = _collect_unique_stems(hint_data, vertical=False)
@@ -510,6 +516,7 @@ _SOFT_DOTTED_BASE = frozenset(
         0x0069,  # i  Latin small letter i
         0x006A,  # j  Latin small letter j
         0x012F,  # į  Latin small letter i with ogonek
+        0x0133,  # ĳ  Latin small ligature ij (not Soft_Dotted, but two tittles)
         0x0249,  # ɉ  Latin small letter j with stroke
         0x0268,  # ɨ  Latin small letter i with stroke
         0x029D,  # ʝ  Latin small letter j with crossed-tail
@@ -603,11 +610,9 @@ def _accent_zone_bounds(
     return above_y, below_y
 
 
-def _flat_contour_points(glyph) -> list[tuple[float, float]]:
-    """All contour points (on-curve + off-curve) of the glyph, with
-    components decomposed via ``DecomposingRecordingPen``.
-
-    Returns a flat list of ``(x, y)`` tuples.
+def _flat_contours(glyph) -> list[list[tuple[float, float]]]:
+    """Contour points (on-curve + off-curve) of the glyph, one list per
+    contour, with components decomposed via ``DecomposingRecordingPen``.
     """
     if glyph is None:
         return []
@@ -628,14 +633,18 @@ def _flat_contour_points(glyph) -> list[tuple[float, float]]:
     except Exception:
         return []
 
-    pts: list[tuple[float, float]] = []
+    result: list[list[tuple[float, float]]] = []
     for c in contours:
         try:
-            for p in c.points:
-                pts.append((p.x, p.y))
+            result.append([(p.x, p.y) for p in c.points])
         except Exception:
             continue
-    return pts
+    return result
+
+
+def _flat_contour_points(glyph) -> list[tuple[float, float]]:
+    """All contour points of the glyph as a flat list of ``(x, y)`` tuples."""
+    return [pt for contour in _flat_contours(glyph) for pt in contour]
 
 
 def _vstem_edge_y_values(
@@ -665,7 +674,10 @@ def _apply_accent_zone_filter(
     """Remove h/v hints located in the glyph's accent zone.
 
     Triggers only when Unicode NFD decomposition confirms the glyph carries
-    an above and/or below combining mark. The cut zone is taken from the
+    an above and/or below combining mark, or when the glyph is a bare
+    soft-dotted letter (i, j, і, ј, ...) whose tittle sits as a detached
+    contour above xHeight -- the tittle is then cut like an above-accent.
+    The cut zone is taken from the
     base glyph's actual bounding box (when the base glyph exists in the
     UFO) or from font metrics as a fallback.
 
@@ -702,10 +714,21 @@ def _apply_accent_zone_filter(
         return vstems, hstems
 
     positions, bar_positions, base_cp = _glyph_accent_info(glyph)
+    # A soft-dotted glyph with no above-mark (i, j, і, ј, į, ị) keeps its
+    # tittle, and the tittle is treated as an above-accent: an hstem on it
+    # snaps the dot to the body at small ppem, while without one the
+    # rasterizer keeps the two apart.
+    tittle = base_cp in _SOFT_DOTTED_BASE and "above" not in positions
+    if tittle:
+        positions = positions | {"above"}
     if not positions:
         return vstems, hstems
 
     above_y, below_y = _accent_zone_bounds(glyph, positions, base_cp)
+    if tittle and above_y is not None and not _has_detached_contour_above(glyph, above_y - 5.0):
+        # No detached dot above xHeight (a small-cap or dotless design under
+        # a soft-dotted name): whatever reaches up there is body, not accent.
+        above_y = None
     if above_y is None and below_y is None:
         return vstems, hstems
 
@@ -746,6 +769,11 @@ def _apply_accent_zone_filter(
         new_vstems.append(s)
 
     return new_vstems, new_hstems
+
+
+def _has_detached_contour_above(glyph, y: float) -> bool:
+    """True if some contour of the glyph lies entirely at or above ``y``."""
+    return any(contour and min(py for _, py in contour) >= y for contour in _flat_contours(glyph))
 
 
 # ── Small element filtering ──────────────────────────────────────────────────

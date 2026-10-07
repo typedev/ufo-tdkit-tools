@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ufo_tdkit_tools.pipeline import ProcessResult, _resolve_source, process_font
+from ufo_tdkit_tools.pipeline import ProcessResult, _clean_stem_snaps, _resolve_source, process_font
 from ufo_tdkit_tools.ps_hints.parser import HintSource
 
 
@@ -37,10 +37,17 @@ class _FakeLayer:
         return self._glyphs[name]
 
 
+class _Info:
+    def __init__(self, h, v):
+        self.postscriptStemSnapH = h
+        self.postscriptStemSnapV = v
+
+
 class _FakeFont:
     def __init__(self, glyphs=None, extra_layers=None):
         self._glyphs = list(glyphs or [])
         self.layers = [_FakeLayer("public.default", self._glyphs)] + list(extra_layers or [])
+        self.info = _Info(None, None)
 
     def __iter__(self):
         return iter(self._glyphs)
@@ -189,3 +196,34 @@ class TestProcessFontDispatch:
 
         assert result.success is True
         assert captured == {"tx_path": "/opt/afdko/tx", "makeotf_path": "/opt/afdko/makeotf"}
+
+
+class _InfoFont:
+    def __init__(self, h, v):
+        self.info = _Info(h, v)
+
+
+class TestCleanStemSnaps:
+    def _clean(self, h, v):
+        font = _InfoFont(h, v)
+        _clean_stem_snaps(font, logging.getLogger("test"))
+        return font.info.postscriptStemSnapH, font.info.postscriptStemSnapV
+
+    def test_zero_padding_removed_order_kept(self):
+        h, v = self._clean([41, 67, 0, 0], [74, 54, 0, 0, 0])
+        assert h == [41, 67]
+        assert v == [74, 54]
+
+    def test_repeats_removed(self):
+        _, v = self._clean(None, [0, 0, 166, 166, 166, 111, 189])
+        assert v == [166, 111, 189]
+
+    def test_all_zero_becomes_none(self):
+        assert self._clean([0, 0], [0, 0, 0]) == (None, None)
+
+    def test_clean_values_untouched(self):
+        assert self._clean([41, 67], [54, 74]) == ([41, 67], [54, 74])
+
+    def test_capped_at_twelve(self):
+        h, _ = self._clean(list(range(1, 20)), None)
+        assert h == list(range(1, 13))

@@ -103,7 +103,12 @@ Per-snap windows: [40, 60] ∪ [80, 120]
 A stem of 70 is removed (not near any snap — likely a counter artifact).
 ```
 
-**Fallback:** if `stemSnapV` is empty, use the legacy `width > UPM × 0.3` cut.
+**Zero padding:** non-positive snap values are dropped first. FontLab pads
+`postscriptStemSnapH/V` with zeros up to the array's maximum length; a 0 kept as a
+snap gives a `[0, 5]` window, and an all-zero list would remove every vstem.
+
+**Fallback:** if `stemSnapV` is empty (after dropping zeros), use the legacy
+`width > UPM × 0.3` cut.
 
 ---
 
@@ -153,6 +158,15 @@ composite (`idieresis`, `afii10104`). Using `i.bounds.yMax` would place the
 threshold above the accent and miss it. For these bases (Unicode `Soft_Dotted`
 property — Latin i/j and variants, Cyrillic і/ј, Greek yot) the threshold is
 `info.xHeight + 5` regardless of whether the base glyph exists.
+
+**Bare soft-dotted glyphs** (`i`, `j`, `і`, `ј`, `ĳ`, suffixed variants like
+`i.alt`, and `į`/`ị` whose only marks sit below) don't decompose to an above-mark,
+but their tittle is treated as one: the above zone is added with the same
+`info.xHeight + 5` threshold, so the tittle's hstem (and a tittle-only vstem) is
+removed. An hstem on the tittle snaps the dot onto the body at small ppem; without
+it the rasterizer keeps a gap between them. The cut applies only when some contour
+lies entirely at or above xHeight — a small-cap `i.sc` whose single contour reaches
+above xHeight keeps its hints.
 
 **Fallbacks** when the base glyph isn't in the UFO:
 - Above: `info.capHeight + 5` for Lu base; `info.xHeight + 5` for soft-dotted

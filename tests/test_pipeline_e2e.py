@@ -39,6 +39,7 @@ def _build_minimal_ufo(
     with_hints=True,
     with_features=False,
     with_production_names=False,
+    with_composite=False,
     hint_glyphs=None,
 ):
     """Build a tiny UFO with one rectangle glyph; optional v-stem/h-stem hint.
@@ -51,6 +52,11 @@ def _build_minimal_ufo(
     and a ``public.postscriptNames`` mapping renaming it to ``uni0100`` — the
     setup that used to make the shell and the donor speak different glyph
     namespaces (issue #1).
+
+    With ``with_composite=True`` the UFO also gets an ``acute`` glyph and an
+    ``Aacute`` built from ``A`` + ``acute`` components. ``acute``'s point
+    carries a leftover name (``hr00``) distinct from ``A``'s, the setup in
+    which ``tx`` merged the standalone accent's hints into the composite.
 
     ``hint_glyphs`` restricts authored hints to the named glyphs, modelling a
     hand-hinted master where only base forms carry hints.
@@ -128,6 +134,24 @@ def _build_minimal_ufo(
                 ],
             }
         font.lib["public.postscriptNames"] = {"Amacron": "uni0100"}
+
+    if with_composite:
+        acute = font.newGlyph("acute")
+        acute.width = 300
+        acute.unicode = 0x00B4
+        ac_pen = acute.getPen()
+        ac_pen.moveTo((100, 760))
+        ac_pen.lineTo((200, 760))
+        ac_pen.lineTo((200, 860))
+        ac_pen.lineTo((100, 860))
+        ac_pen.closePath()
+        acute[0][0].name = "hr00"
+        composite = font.newGlyph("Aacute")
+        composite.width = 600
+        composite.unicode = 0x00C1
+        comp_pen = composite.getPen()
+        comp_pen.addComponent("A", (1, 0, 0, 1, 0, 0))
+        comp_pen.addComponent("acute", (1, 0, 0, 1, 150, 0))
 
     if with_features:
         alt = font.newGlyph("A.alt")
@@ -534,6 +558,28 @@ class TestPipelineEndToEnd:
         assert result.hint_source_used == "processedglyphs"
         assert otf_out.exists()
         assert ufo_out.exists()
+
+    def test_composite_gets_its_own_optimized_hints(self, tmp_path):
+        # tx ignores a composite's own hints and merges its components'
+        # instead, so the optimizer's accent cut was lost and the standalone
+        # acute's hstem came back through hint substitution.
+        ufo_in = tmp_path / "in.ufo"
+        _build_minimal_ufo(ufo_in, with_composite=True)
+
+        result = process_font(
+            ufo_in, tmp_path / "out.otf", tmp_path / "out.ufo", autohint="all", optimize=True
+        )
+
+        assert result.success, result.error
+        program = _desubroutinized_programs(tmp_path / "out.otf")["Aacute"]
+        assert "hintmask" not in program
+        stems = _declared_stems(program)
+        assert stems["hstem"], "Aacute lost its body stems"
+        assert all(pos + max(width, 0) <= 712 for pos, width in stems["hstem"]), stems
+        # The output UFO keeps the composite as components.
+        import defcon
+
+        assert len(defcon.Font(str(tmp_path / "out.ufo"))["Aacute"].components) == 2
 
     def test_otf_roundtrip(self, tmp_path):
         # 1. UFO → OTF

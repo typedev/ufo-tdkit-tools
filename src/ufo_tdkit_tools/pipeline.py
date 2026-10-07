@@ -10,14 +10,19 @@ compilation to OTF.
 
 from __future__ import annotations
 
+import copy
 import logging
 import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from ufo_tdkit_tools.constants import PROCESSED_LAYER_NAME
+from ufo_tdkit_tools.constants import (
+    ADOBE_HINT_KEY_V2,
+    PROCESSED_LAYER_NAME,
+    compute_outline_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +220,10 @@ def process_font(
 
         source_used = source or HintSource.PROCESSED_LAYER
 
+        # Read before the buffer layer goes away: the compile copy needs the
+        # decomposed, hint-named outlines it holds for composite glyphs.
+        flattened = _collect_flattened_composites(font)
+
         drop_processed_layer = not had_processed_layer
         if drop_processed_layer:
             current = [layer.name for layer in font.layers]
@@ -229,13 +238,24 @@ def process_font(
             _remove_hashmap_data(output_ufo, log)
         log.info(f"pipeline: saved UFO to {output_ufo}")
 
+        compile_ufo = output_ufo
+        if flattened:
+            compile_ufo = Path(work_dir.name) / "compile" / output_ufo.name
+            compile_ufo.parent.mkdir()
+            _apply_flattened_composites(font, flattened)
+            font.save(str(compile_ufo))
+            log.info(
+                f"pipeline: compiling from a copy with {len(flattened)} composite glyph(s) "
+                "decomposed, so tx reads their own hints"
+            )
+
         from ufo_tdkit_tools.compilation.compiler import (
             compile_otf_preserve_optimized,
         )
 
         compile_stats: dict[str, int] = {}
         ok = compile_otf_preserve_optimized(
-            str(output_ufo),
+            str(compile_ufo),
             str(output_otf),
             logger=log,
             tx_path=tx_path,
@@ -294,6 +314,54 @@ def _load_input(input_path: Path, work_dir: str, is_binary: bool):
     shutil.copytree(input_path, work_ufo)
     font = fp.OpenFont(str(work_ufo), showInterface=False)
     return font, None
+
+
+def _collect_flattened_composites(font) -> dict[str, tuple[Any, dict]]:
+    """Decomposed outlines and hints for composite glyphs, from processedglyphs.
+
+    ``tx`` never reads a composite glyph's own hints: it decomposes the glyph
+    and takes each component's hints from the component glyph instead,
+    finding each set's start point by name. So the optimizer's result for
+    ``aacute`` is discarded, the standalone ``acute``'s hstem comes back, and
+    whether it does depends on whether the components' point names happen to
+    collide. The processedglyphs layer holds every glyph decomposed, with
+    its hint points named, so it supplies a component-free stand-in.
+
+    Returns:
+        ``{glyph_name: (recorded point-pen outline, autohint.v2 dict)}`` for
+        every default-layer glyph with components whose processed glyph and
+        default ``autohint.v2`` entry both exist.
+    """
+    from fontTools.pens.recordingPen import RecordingPointPen
+
+    if PROCESSED_LAYER_NAME not in [layer.name for layer in font.layers]:
+        return {}
+    processed = font.getLayer(PROCESSED_LAYER_NAME)
+    result: dict[str, tuple[Any, dict]] = {}
+    for glyph in font:
+        if not glyph.components or ADOBE_HINT_KEY_V2 not in glyph.lib:
+            continue
+        if glyph.name not in processed:
+            continue
+        pglyph = processed[glyph.name]
+        hints = pglyph.lib.get(ADOBE_HINT_KEY_V2)
+        if not hints or not len(pglyph):
+            continue
+        pen = RecordingPointPen()
+        pglyph.drawPoints(pen)
+        result[glyph.name] = (pen, copy.deepcopy(dict(hints)))
+    return result
+
+
+def _apply_flattened_composites(font, flattened: dict[str, tuple[Any, dict]]) -> None:
+    """Replace each composite's outline with its decomposed stand-in and hints."""
+    for name, (pen, hints) in flattened.items():
+        glyph = font[name]
+        glyph.clearComponents()
+        glyph.clearContours()
+        pen.replay(glyph.getPointPen())
+        hints["id"] = compute_outline_hash(glyph)
+        glyph.lib[ADOBE_HINT_KEY_V2] = hints
 
 
 def _clean_stem_snaps(font, log: logging.Logger) -> None:

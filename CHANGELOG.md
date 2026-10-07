@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-07
+
+### Fixed
+
+- **Composite glyphs ignored the optimizer and kept their accents' hints.** `tx` never reads a composite glyph's own hints: it decomposes it and merges the hints of each component glyph, starting each set at a point found by name. So `aacute` got `a`'s hints plus the standalone `acute`'s hstem through hint substitution — exactly what the optimizer's accent cut removes — or, when the two components' point names happened to collide, lost the accent's set by accident (Book looked clean, Bold did not: 161 composites with `hintmask` in Bold, 21 in Book). `process_font` now compiles from a copy of the output UFO in which every composite with hints is replaced by its decomposed processedglyphs outline and that layer's hints; the saved UFO keeps its components, and the OTF outlines are unchanged (ufo2ft decomposes CFF composites anyway).
+
 ## [0.2.1] - 2026-10-07
 
 ### Fixed
@@ -67,6 +73,7 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/typedev/ufo-tdkit-tools/releases/tag/v0.2.0

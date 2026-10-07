@@ -121,3 +121,123 @@ class TestPsHintsApi:
 
         report = validate_ps_hints(str(ufo_path))
         assert {"valid", "glyphs_checked", "glyphs_with_hints", "errors", "warnings"} <= set(report)
+
+
+class TestGlyphsApi:
+    """Names Font-Rover imports from the Glyphs importer (re-exported there)."""
+
+    PACKAGE_NAMES = {
+        "GLYPHS_EXTENSIONS",
+        "GlyphsConversionResult",
+        "GlyphsSourceInfo",
+        "convert_glyphs_to_ufos",
+        "default_output_dir",
+        "describe_existing",
+        "format_source_summary",
+        "inspect_glyphs_source",
+        "is_glyphs_source",
+        "plan_output_paths",
+        "apply_corner_components",
+        "glyphs_hints_to_stems",
+        "import_ps_hints",
+        "ufo_point_index",
+        "preflight_source",
+        "UnwritableOutlineError",
+    }
+
+    def test_import_is_cheap_without_glyphslib(self):
+        import subprocess
+        import sys
+
+        code = (
+            "import sys; import ufo_tdkit_tools.glyphs as g; "
+            "assert 'glyphsLib' not in sys.modules, 'glyphsLib imported eagerly'; "
+            "assert set(g.__all__) >= {'convert_glyphs_to_ufos', 'is_glyphs_source'}"
+        )
+        subprocess.run([sys.executable, "-c", code], check=True)
+
+    def test_package_names(self):
+        import ufo_tdkit_tools.glyphs as glyphs
+
+        assert self.PACKAGE_NAMES <= set(glyphs.__all__)
+        for name in self.PACKAGE_NAMES:
+            assert getattr(glyphs, name) is not None
+
+    def test_function_signatures(self):
+        from ufo_tdkit_tools import glyphs
+
+        expected = {
+            "convert_glyphs_to_ufos": [
+                "source_path",
+                "output_dir",
+                "progress_callback",
+                "apply_corners",
+                "font",
+                "cancel",
+            ],
+            "inspect_glyphs_source": ["source_path"],
+            "plan_output_paths": ["source_path", "output_dir"],
+            "default_output_dir": ["source_path"],
+            "describe_existing": ["paths"],
+            "format_source_summary": ["info"],
+            "is_glyphs_source": ["path"],
+            "apply_corner_components": ["ufo_font"],
+            "import_ps_hints": ["ufo_font"],
+            "glyphs_hints_to_stems": ["glyph"],
+            "ufo_point_index": ["contour", "glyphs_index"],
+            "preflight_source": ["gs_font"],
+        }
+        for name, params in expected.items():
+            assert list(inspect.signature(getattr(glyphs, name)).parameters) == params, name
+
+    def test_result_fields(self):
+        from ufo_tdkit_tools.glyphs import GlyphsConversionResult, GlyphsSourceInfo
+
+        assert {
+            "source_path",
+            "output_dir",
+            "ufo_paths",
+            "designspace_path",
+            "open_path",
+            "warnings",
+            "glyph_count",
+            "master_count",
+            "corners_applied",
+            "ps_hints_imported",
+            "tt_deltas_restored",
+        } <= _fields(GlyphsConversionResult)
+        assert {
+            "path",
+            "family_name",
+            "master_count",
+            "glyph_count",
+            "instance_count",
+            "axes",
+            "corner_component_count",
+            "ps_hint_count",
+            "tt_hint_count",
+            "format_version",
+        } <= _fields(GlyphsSourceInfo)
+
+    def test_submodule_names(self):
+        from ufo_tdkit_tools.glyphs import converter, fast_inspect, format4, warning_summary
+
+        assert issubclass(converter.ConversionCancelled, Exception)
+        assert converter.GlyphsSourceInfo is not None
+        assert callable(converter._unique_source_filenames)
+
+        assert _params(fast_inspect.read_source) == {"source_path"}
+        assert _params(fast_inspect.quick_inspect) == {"source_path"}
+        assert _params(fast_inspect.plan_output_filenames) == {"gs_font"}
+        assert isinstance(fast_inspect.COUNT_UNKNOWN, int)
+
+        assert _params(format4.load_glyphs_source) == {"source_path"}
+        assert isinstance(format4.FORMAT_NOTES_ATTR, str)
+
+        assert _params(warning_summary.summarize_warnings) == {"warnings"}
+        assert _params(warning_summary.summary_line) == {"groups"}
+        assert _params(warning_summary.message_template) == {"message"}
+        assert {"category", "severity", "template", "count", "examples"} <= _fields(
+            warning_summary.WarningGroup
+        )
+        assert isinstance(warning_summary.MAX_EXAMPLES, int)

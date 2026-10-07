@@ -12,6 +12,7 @@ should only need `process_font`.
 - [Top-level constants](#top-level-constants)
 - [Sub-module APIs](#sub-module-apis)
   - [`extraction` — binary → UFO](#extraction--binary--ufo)
+  - [`glyphs` — Glyphs.app source → UFO](#glyphs--glyphsapp-source--ufo)
   - [`compilation` — UFO → OTF](#compilation--ufo--otf)
   - [`ps_hints.parser` — data models & parsing](#ps_hintsparser--data-models--parsing)
   - [`ps_hints.batch` — whole-font wrappers](#ps_hintsbatch--whole-font-wrappers)
@@ -27,6 +28,7 @@ should only need `process_font`.
 pip install ufo-tdkit-tools                 # core: constants, ps_hints parser/optimizer/validator
 pip install ufo-tdkit-tools[extraction]     # + binary → UFO  (pulls afdko, ufo-extractor, defcon)
 pip install ufo-tdkit-tools[compilation]    # + UFO → OTF     (pulls afdko, ufo2ft, cffsubr, defcon)
+pip install ufo-tdkit-tools[glyphs]         # + .glyphs / .glyphspackage → UFO (pulls glyphsLib <7, ufoLib2)
 pip install ufo-tdkit-tools[all]            # everything
 ```
 
@@ -227,6 +229,39 @@ The font lives inside `temp_dir`. Persist by calling `result.font.save("path.ufo
 then `result.temp_dir.cleanup()`.
 
 Variable fonts produce a warning and only the default instance is extracted.
+
+### `glyphs` — Glyphs.app source → UFO
+
+Requires the `glyphs` extra. Converts `.glyphs` / `.glyphspackage` to UFO
+masters plus a `.designspace` (multi-master), repairing what glyphsLib would
+refuse and restoring what it drops. Full reference, including every repair and
+why it exists: [GLYPHS_IMPORT.md](GLYPHS_IMPORT.md).
+
+```python
+from ufo_tdkit_tools.glyphs import (
+    convert_glyphs_to_ufos,
+    default_output_dir,
+    describe_existing,
+    inspect_glyphs_source,
+    plan_output_paths,
+)
+
+out_dir = default_output_dir("Family.glyphs")           # <source dir>/Family
+existing = describe_existing(plan_output_paths("Family.glyphs", out_dir))
+result = convert_glyphs_to_ufos("Family.glyphs", out_dir)
+# GlyphsConversionResult: source_path, output_dir, ufo_paths, designspace_path,
+#   open_path, warnings, glyph_count, master_count, corners_applied,
+#   ps_hints_imported, tt_deltas_restored
+```
+
+Also exported: `GLYPHS_EXTENSIONS`, `is_glyphs_source`, `format_source_summary`,
+`GlyphsSourceInfo`, `apply_corner_components`, `import_ps_hints`,
+`glyphs_hints_to_stems`, `ufo_point_index`, `preflight_source`,
+`UnwritableOutlineError`. Submodules used directly: `converter`
+(`ConversionCancelled`), `fast_inspect` (`read_source`, `quick_inspect`,
+`plan_output_filenames`, `COUNT_UNKNOWN`), `format4` (`load_glyphs_source`,
+`FORMAT_NOTES_ATTR`), `warning_summary` (`summarize_warnings`, `summary_line`,
+`message_template`, `WarningGroup`, `MAX_EXAMPLES`).
 
 ### `compilation` — UFO → OTF
 

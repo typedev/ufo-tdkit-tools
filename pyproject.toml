@@ -1,6 +1,6 @@
 [project]
 name = "ufo-tdkit-tools"
-version = "0.2.2"
+version = "0.3.0"
 description = "PS hints extraction, optimization, and preserve-mode compilation for UFO fonts"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -46,8 +46,15 @@ compilation = [
     "fontParts>=0.10.0",
     "afdko>=5.0.0,<6",
 ]
+# The Glyphs importer leans on glyphsLib internals (closed-path node rotation
+# in ps_hints/tt_hints, glyphsLib.filters.cornerComponents), so stay below
+# the next major. Exercised on glyphsLib 6.12.7.
+glyphs = [
+    "glyphsLib>=6.0.0,<7",
+    "ufoLib2>=0.16.0",
+]
 all = [
-    "ufo-tdkit-tools[extraction,compilation]",
+    "ufo-tdkit-tools[extraction,compilation,glyphs]",
 ]
 
 [dependency-groups]

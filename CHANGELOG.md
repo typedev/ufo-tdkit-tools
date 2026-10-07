@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
+### Added
+
+- **`ufo_tdkit_tools.glyphs` — Glyphs.app source import** (`.glyphs` / `.glyphspackage` → UFO masters + `.designspace`), moved from Font-Rover's `font_rover.glyphs_import` with behaviour unchanged. A layer around glyphsLib: preflight repairs for real-world sources glyphsLib refuses, contradictory axis maps dropped, an experimental Glyphs 4 → format 3 rewrite, and post-passes that bake corner components (on request), translate Glyphs PostScript hints to `com.adobe.type.autohint.v2`, restore TrueType delta amounts and clean zero-padded stem snaps. New optional extra `glyphs` (`glyphsLib>=6.0.0,<7`, `ufoLib2>=0.16.0`), included in `all`. Imports are lazy — importing the package does not need glyphsLib. Public names are pinned in `tests/test_public_api.py`. Reference: `docs/GLYPHS_IMPORT.md`.
+
 ## [0.2.2] - 2026-10-07
 
 ### Fixed
@@ -73,7 +79,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/typedev/ufo-tdkit-tools/releases/tag/v0.2.0

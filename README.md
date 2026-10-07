@@ -8,6 +8,7 @@ PS hints extraction, optimization, and preserve-mode compilation for UFO fonts.
 ## Features
 
 - **extraction** -- Convert binary fonts (OTF/TTF/WOFF/WOFF2) to UFO with full PS hint preservation (multi-entry `hintSetList`, counter triplets `hstem3`/`vstem3`, font-level Private dict including `StdHW`/`StdVW`) and FEA post-processing (one feature block per tag, inlined `aalt` for spec compliance).
+- **glyphs** -- Convert Glyphs.app sources (`.glyphs` / `.glyphspackage`) to UFO masters + `.designspace` through glyphsLib, with preflight repairs for real-world sources, PS hints translated to `com.adobe.type.autohint.v2` and an experimental Glyphs 4 reader. See [docs/GLYPHS_IMPORT.md](docs/GLYPHS_IMPORT.md).
 - **ps_hints** -- Parse, optimize, analyze, and validate PostScript hints in UFO fonts; move hints between processedglyphs / glyph lib / default layers.
 - **compilation** -- Compile UFO back to OTF preserving PS hints (via AFDKO `makeotf` + per-glyph charstring merge, then production glyph names + `cffsubr` subroutinization). Parallel batch via `ProcessPoolExecutor`.
 
@@ -17,6 +18,7 @@ PS hints extraction, optimization, and preserve-mode compilation for UFO fonts.
 pip install ufo-tdkit-tools                    # core (constants, ps_hints parser)
 pip install ufo-tdkit-tools[extraction]        # + binary font conversion
 pip install ufo-tdkit-tools[compilation]       # + OTF compilation with hints
+pip install ufo-tdkit-tools[glyphs]            # + Glyphs.app source conversion
 pip install ufo-tdkit-tools[all]               # everything
 ```
 

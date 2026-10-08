@@ -100,6 +100,31 @@ optimized=36 autohinted=0 failed=0
 `--in-place` only rewrites `.otf` inputs (atomically, so a mid-pipeline
 failure never corrupts the source). UFO and other binary inputs use `-o DIR`.
 
+### Glyphs.app sources → UFO
+
+`glyphs2ufo` (needs the `glyphs` extra) converts `.glyphs` / `.glyphspackage`
+sources to UFO masters, plus a `.designspace` when a source has more than one
+master:
+
+```bash
+# Writes Family/<master>.ufo + Family/Family.designspace beside the source
+ufo-tdkit-tools glyphs2ufo Family.glyphs
+
+# Several sources into one directory: build/<source stem>/...
+ufo-tdkit-tools glyphs2ufo -o build/ Sans.glyphspackage Serif.glyphs
+
+# What would be written, and what already exists there -- converts nothing
+ufo-tdkit-tools glyphs2ufo --dry-run Family.glyphs
+```
+
+It refuses to replace UFOs or a `.designspace` already at the destination
+unless given `--force` (glyphsLib deletes an existing UFO before writing it).
+`--apply-corners` bakes corner/cap components into the outlines. glyphsLib's
+warnings — often thousands per source — are grouped into one line per kind,
+repairs first; `-v` adds progress and example glyph names, `-q` keeps only the
+summary line (`converted=N failed=K`). Ctrl-C cancels cleanly: the conversion
+stops at its next checkpoint and removes what it had written (exit code 130).
+
 ## Round-trip fidelity
 
 OTF → UFO → OTF preserves declared `hstem`/`vstem` positions and widths byte-for-byte, hint substitution between drawing operations, counter-mask grouping, and font-level Private dict scalars. The one structural exception is hint substitution that fires *between* subpaths (a `hintmask` immediately before a `moveto`, common on disconnected glyphs like `i`, `j`, dieresis-bearing letters): the `autohint.v2` format has no anchor for these and AFDKO's own autohint produces the same flattening.

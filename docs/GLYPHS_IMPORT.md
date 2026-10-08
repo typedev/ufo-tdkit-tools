@@ -67,6 +67,32 @@ print(result.ufo_paths)        # every master written
 print(result.warnings)         # what glyphsLib could not carry over
 ```
 
+## Command line
+
+```bash
+ufo-tdkit-tools glyphs2ufo [-o DIR] [--force] [--apply-corners] [--dry-run] [-v|-q] SOURCE...
+```
+
+A thin wrapper over the API below (`cli._cmd_glyphs2ufo`):
+
+- **Destination**: `default_output_dir()` (a folder named after the source,
+  beside it); `-o DIR` is used as is for one source and as `DIR/<stem>` for
+  several.
+- **Overwrite check** from the cheap read (`fast_inspect.read_source()` +
+  `plan_output_filenames()`, plus `<stem>.designspace` when there is more
+  than one master — the rule Font-Rover's dialog uses). Anything already there
+  makes the source fail unless `--force`. A single-master source with brace
+  layers also writes a `.designspace`; that one is not predicted.
+- **Cancel**: the conversion runs in a worker thread and Ctrl-C sets the
+  `cancel` event, so `ConversionCancelled` cleans up what the run wrote.
+  Exit code 130. A second Ctrl-C aborts without waiting for the checkpoint.
+- **Warnings**: glyphsLib's logger stops propagating to stderr for the run;
+  the converter's own handler still collects every record, and the CLI prints
+  `summarize_warnings()` groups (`-v` adds examples).
+- **Output**: one summary line on stdout, `converted=N failed=K`
+  (`planned=N` for `--dry-run`, `cancelled=1` added on Ctrl-C); exit 1 if any
+  source failed.
+
 ## Conversion Pipeline
 
 1. `load_glyphs_source()` (`format4.py`) parses the source (a file, or a

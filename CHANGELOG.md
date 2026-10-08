@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-07
+
+### Added
+
+- **`ufo-tdkit-tools glyphs2ufo`** — command-line conversion of `.glyphs` / `.glyphspackage` sources to UFO masters + `.designspace`, over `ufo_tdkit_tools.glyphs`. Writes beside the source by default (`-o DIR` for another place; `DIR/<stem>` per source when several are given), refuses to replace existing outputs without `--force`, `--apply-corners`, `--dry-run`. glyphsLib's warnings are grouped into one line per kind instead of echoed raw (a 10-master source: thousands of lines down to 8). Ctrl-C cancels cleanly — the conversion stops at its next checkpoint and removes what it wrote (exit 130). Prints a `converted=N failed=K` summary line.
+
+### Changed
+
+- Copyright headers of the `glyphs` package now read Alexander Lubovenko.
+
 ## [0.3.0] - 2026-10-07
 
 ### Added
@@ -79,7 +89,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.0...v0.2.1

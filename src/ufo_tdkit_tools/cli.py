@@ -3,7 +3,8 @@
 
 """Command-line interface for ufo-tdkit-tools.
 
-Exposes the :func:`ufo_tdkit_tools.pipeline.process_font` pipeline as a console
+Exposes the :func:`ufo_tdkit_tools.pipeline.process_font` pipeline
+(``optimize-otf``) and the Glyphs.app importer (``glyphs2ufo``) as a console
 script. Designed for build logs: every run prints a single machine-parseable
 summary line (``optimized=N autohinted=M failed=K``) and returns a non-zero exit
 code when any input failed.
@@ -95,6 +96,52 @@ def _build_parser() -> argparse.ArgumentParser:
         "-q", "--quiet", action="store_true", help="Only print the final summary line."
     )
     opt.set_defaults(func=_cmd_optimize_otf)
+
+    g2u = sub.add_parser(
+        "glyphs2ufo",
+        help="Convert Glyphs.app sources (.glyphs/.glyphspackage) to UFO masters.",
+        description="Convert each source to UFO masters, plus a .designspace when it "
+        "has more than one master, repairing what glyphsLib would refuse (see "
+        "docs/GLYPHS_IMPORT.md). Needs the 'glyphs' extra. Prints a "
+        "'converted=N failed=K' summary and exits non-zero if any source failed.",
+    )
+    g2u.add_argument(
+        "sources", nargs="+", metavar="SOURCE", help="Input .glyphs file or .glyphspackage"
+    )
+    g2u.add_argument(
+        "-o",
+        "--output-dir",
+        metavar="DIR",
+        help="Write into DIR (one source) or DIR/<source stem> (several). "
+        "Default: a folder named after each source, beside it.",
+    )
+    g2u.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace UFOs / .designspace already at the destination. Without it a "
+        "source whose outputs exist is skipped and counted as failed.",
+    )
+    g2u.add_argument(
+        "--apply-corners",
+        action="store_true",
+        help="Bake corner and cap components into the outlines (cannot be undone).",
+    )
+    g2u.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what each source holds and the paths it would write; convert nothing.",
+    )
+    g2u_verbosity = g2u.add_mutually_exclusive_group()
+    g2u_verbosity.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Log progress and example glyphs for each warning group.",
+    )
+    g2u_verbosity.add_argument(
+        "-q", "--quiet", action="store_true", help="Only print the final summary line."
+    )
+    g2u.set_defaults(func=_cmd_glyphs2ufo)
 
     return parser
 
@@ -220,6 +267,170 @@ def _process_one(
         optimize=optimize,
         logger_=log,
     )
+
+
+def _cmd_glyphs2ufo(args: argparse.Namespace) -> int:
+    log = logging.getLogger("ufo_tdkit_tools.cli")
+    try:
+        import glyphsLib  # noqa: F401
+    except ImportError:
+        log.error("glyphs2ufo needs glyphsLib: pip install 'ufo-tdkit-tools[glyphs]'")
+        print("converted=0 failed=" + str(len(args.sources)))
+        return 1
+
+    from ufo_tdkit_tools.glyphs import converter as gconv
+    from ufo_tdkit_tools.glyphs.fast_inspect import read_source
+    from ufo_tdkit_tools.glyphs.warning_summary import summarize_warnings
+
+    # glyphsLib reports through its logger, often thousands of lines per
+    # source. The converter's own handler on that logger still collects them
+    # into the grouped report below; only the raw echo to stderr is cut.
+    logging.getLogger("glyphsLib").propagate = False
+
+    converted = failed = 0
+    several = len(args.sources) > 1
+
+    for raw in args.sources:
+        src = Path(raw)
+        if not gconv.is_glyphs_source(src):
+            log.error(f"{src}: not a .glyphs / .glyphspackage source")
+            failed += 1
+            continue
+        if not src.exists():
+            log.error(f"{src}: not found")
+            failed += 1
+            continue
+
+        if args.output_dir:
+            out_dir = Path(args.output_dir)
+            if several:
+                out_dir = out_dir / src.stem
+        else:
+            out_dir = gconv.default_output_dir(src)
+
+        try:
+            info, gs_font = read_source(src)
+            planned = [out_dir / name for name in _planned_filenames(gs_font, src)]
+        except Exception as exc:  # noqa: BLE001 -- never let one source abort the batch
+            log.error(f"{src}: cannot read: {type(exc).__name__}: {exc}")
+            failed += 1
+            continue
+
+        existing = gconv.describe_existing(planned)
+        if args.dry_run:
+            print(f"{src}: {gconv.format_source_summary(info)}")
+            for path in planned:
+                mark = " (exists)" if path in existing else ""
+                print(f"  -> {path}{mark}")
+            converted += 1
+            continue
+        if existing and not args.force:
+            names = ", ".join(p.name for p in existing[:5])
+            more = f" (+{len(existing) - 5} more)" if len(existing) > 5 else ""
+            log.error(
+                f"{src}: {len(existing)} output(s) already exist in {out_dir}: "
+                f"{names}{more}; use --force to replace them"
+            )
+            failed += 1
+            continue
+
+        try:
+            result = _convert_interruptibly(gconv, src, out_dir, args, log)
+        except gconv.ConversionCancelled as exc:
+            log.error(f"{src}: cancelled; removed {len(exc.removed)} path(s) it had written")
+            if existing:
+                log.error(
+                    "  outputs being replaced were deleted before the cancel and cannot be restored"
+                )
+            print(f"converted={converted} failed={failed + 1} cancelled=1")
+            return 130
+        except Exception as exc:  # noqa: BLE001
+            log.error(f"{src}: {type(exc).__name__}: {exc}")
+            failed += 1
+            continue
+
+        converted += 1
+        if not args.quiet:
+            _report_conversion(log, src, result, summarize_warnings(result.warnings), args)
+
+    counted = "planned" if args.dry_run else "converted"
+    print(f"{counted}={converted} failed={failed}")
+    return 1 if failed else 0
+
+
+def _planned_filenames(gs_font, source: Path) -> list[str]:
+    """UFO filenames plus the .designspace a conversion would write.
+
+    The cheap counterpart of ``converter.plan_output_paths`` (which builds the
+    whole designspace), using the same rule as Font-Rover's import dialog: a
+    .designspace named after the source whenever there is more than one
+    master. A single-master source with brace layers also gets one; that case
+    is not predicted here.
+    """
+    from ufo_tdkit_tools.glyphs.fast_inspect import plan_output_filenames
+
+    names = plan_output_filenames(gs_font)
+    if len(names) > 1:
+        names = names + [f"{source.stem}.designspace"]
+    return names
+
+
+def _convert_interruptibly(gconv, src: Path, out_dir: Path, args, log):
+    """Run the conversion in a worker thread so Ctrl-C becomes a clean cancel.
+
+    The converter polls the event between phases and removes what it wrote;
+    a KeyboardInterrupt raised inside it would leave half-written UFOs behind.
+    """
+    import threading
+
+    cancel = threading.Event()
+    outcome: dict = {}
+
+    def progress(step: int, total: int, message: str) -> None:
+        if args.verbose:
+            log.info(f"  [{step}/{total}] {message}" if total > 0 else f"  {message}")
+
+    def work() -> None:
+        try:
+            outcome["result"] = gconv.convert_glyphs_to_ufos(
+                src,
+                out_dir,
+                progress_callback=progress,
+                apply_corners=args.apply_corners,
+                cancel=cancel,
+            )
+        except BaseException as exc:  # noqa: BLE001 -- re-raised in the caller
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=work, name=f"glyphs2ufo:{src.name}", daemon=True)
+    worker.start()
+    while worker.is_alive():
+        try:
+            worker.join(0.2)
+        except KeyboardInterrupt:
+            if cancel.is_set():
+                raise
+            log.error(f"{src}: cancelling (finishing the current phase; Ctrl-C again to abort)")
+            cancel.set()
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["result"]
+
+
+def _report_conversion(log, src: Path, result, groups, args) -> None:
+    log.warning(
+        f"{src}: ok -> {result.open_path} ({result.master_count} master(s), "
+        f"{result.glyph_count} glyphs, ps hints {result.ps_hints_imported}, "
+        f"corners {result.corners_applied}, tt deltas {result.tt_deltas_restored})"
+    )
+    for group in groups:
+        kind = "repair" if group.is_repair else group.category
+        first, *rest = group.template.splitlines() or [""]
+        log.warning(f"  {group.count:>6}  [{kind}] {first}{' ...' if rest else ''}")
+        if args.verbose and group.examples:
+            shown = ", ".join(group.examples[:10])
+            more = f" (+{len(group.examples) - 10} more)" if len(group.examples) > 10 else ""
+            log.warning(f"          e.g. {shown}{more}")
 
 
 def main(argv: list[str] | None = None) -> int:

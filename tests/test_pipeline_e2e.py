@@ -581,6 +581,31 @@ class TestPipelineEndToEnd:
 
         assert len(defcon.Font(str(tmp_path / "out.ufo"))["Aacute"].components) == 2
 
+    def test_skip_export_glyphs_are_not_autohinted(self, tmp_path):
+        # Glyphs sources carry non-exporting part glyphs (_corner.*, _cap.*)
+        # drawn as open paths; otfautohint asserts on open contours, so
+        # handing it one failed the whole build.
+        import defcon
+
+        ufo_in = tmp_path / "in.ufo"
+        _build_minimal_ufo(ufo_in, with_hints=False)
+        font = defcon.Font(str(ufo_in))
+        part = font.newGlyph("_corner.round")
+        pen = part.getPen()
+        pen.moveTo((0, 100))
+        pen.curveTo((0, 40), (40, 0), (100, 0))
+        pen.endPath()
+        font.lib["public.skipExportGlyphs"] = ["_corner.round"]
+        font.save()
+
+        result = process_font(
+            ufo_in, tmp_path / "out.otf", tmp_path / "out.ufo", autohint="all", optimize=True
+        )
+
+        assert result.success, result.error
+        assert "A" in _hinted_glyphs(tmp_path / "out.otf")
+        assert "_corner.round" not in TTFont(str(tmp_path / "out.otf")).getGlyphOrder()
+
     def test_otf_roundtrip(self, tmp_path):
         # 1. UFO → OTF
         ufo_in = tmp_path / "in.ufo"

@@ -83,6 +83,14 @@ A thin wrapper over the API below (`cli._cmd_glyphs2ufo`):
   than one master — the rule Font-Rover's dialog uses). Anything already there
   makes the source fail unless `--force`. A single-master source with brace
   layers also writes a `.designspace`; that one is not predicted.
+- **Corners are baked by default** (`apply_corners=True`); `--keep-corners`
+  opts out. A UFO with unbaked corners draws without them in any tool that
+  lacks glyphsLib, and does not build with `process_font` at all: ufo2ft runs
+  the `cornerComponents` filter on the defcon shell and the filter rejects
+  defcon fonts (`'Point' object has no attribute 'type'`). The library
+  default stays `False` — an editor that keeps working on the UFO may want the
+  corners as components. `--apply-corners` is still accepted (it was the
+  opt-in in 0.4.0).
 - **Cancel**: the conversion runs in a worker thread and Ctrl-C sets the
   `cancel` event, so `ConversionCancelled` cleans up what the run wrote.
   Exit code 130. A second Ctrl-C aborts without waiting for the checkpoint.
@@ -277,6 +285,14 @@ happens unconditionally, exactly as importing a binary font brings its CFF hints
 across without asking; the source summary reports how many the file holds.
 
 ### Apply corner components (`corners.py`) — on request
+
+**Order matters: PostScript hints are imported before the bake.** A Glyphs
+ghost hint names its node by index, and baking inserts points, so reading the
+hints afterwards put a top ghost at 700 on the wrong node (`hstem 0 -20`).
+After the bake `reanchor_ps_hints()` moves a hint set whose anchor point was
+rebuilt (a corner on the contour's first node) to the new first on-curve point.
+TrueType hints stay under Glyphs' key with Glyphs node indices; after a bake
+those indices no longer match the outline.
 
 Runs `glyphsLib.filters.cornerComponents.CornerComponentsFilter`, then **disarms
 the pass** — and that second half is what makes it correct:

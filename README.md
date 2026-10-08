@@ -119,7 +119,8 @@ ufo-tdkit-tools glyphs2ufo --dry-run Family.glyphs
 
 It refuses to replace UFOs or a `.designspace` already at the destination
 unless given `--force` (glyphsLib deletes an existing UFO before writing it).
-`--apply-corners` bakes corner/cap components into the outlines. glyphsLib's
+Corner and cap components are baked into the outlines by default, so the UFO
+is complete without glyphsLib; `--keep-corners` leaves them as components. glyphsLib's
 warnings — often thousands per source — are grouped into one line per kind,
 repairs first; `-v` adds progress and example glyph names, `-q` keeps only the
 summary line (`converted=N failed=K`). Ctrl-C cancels cleanly: the conversion

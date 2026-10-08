@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-07
+
+### Fixed
+
+- **Baking corner components moved Glyphs ghost hints onto the wrong node.** `convert_glyphs_to_ufos(apply_corners=True)` baked the corners before translating the PostScript hints; a ghost hint names its node by index and the bake inserts points, so a top ghost at 700 came out as `hstem 0 -20`. Hints are now translated first, and `ps_hints.reanchor_ps_hints()` re-anchors a hint set whose anchor point the bake rebuilt.
+- **`process_font` crashed on sources with non-exporting open-path glyphs.** The autohinter was handed every glyph, including those in `public.skipExportGlyphs` — Glyphs' `_corner.*` / `_cap.*` parts are open paths and `otfautohint` asserts on them, failing the whole build. Skip-export glyphs are no longer autohinted (they never reach the binary).
+
+### Changed
+
+- **`glyphs2ufo` bakes corner and cap components by default**; `--keep-corners` opts out. A UFO with unbaked corners draws without them outside glyphsLib and does not build with `process_font` (glyphsLib's corner filter rejects the defcon fonts ufo2ft compiles). `--apply-corners` is still accepted. The library's `convert_glyphs_to_ufos(apply_corners=False)` default is unchanged.
+
 ## [0.4.0] - 2026-10-07
 
 ### Added
@@ -89,7 +100,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.1...v0.2.2

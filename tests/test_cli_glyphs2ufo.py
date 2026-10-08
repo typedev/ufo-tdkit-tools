@@ -56,7 +56,26 @@ class TestArgumentParsing:
         args = _build_parser().parse_args(["glyphs2ufo", "A.glyphs"])
         assert args.sources == ["A.glyphs"]
         assert args.output_dir is None
-        assert not (args.force or args.apply_corners or args.dry_run)
+        assert args.apply_corners  # a finished UFO has its corners baked
+        assert not (args.force or args.dry_run)
+
+    def test_keep_corners_opts_out(self):
+        assert (
+            not _build_parser()
+            .parse_args(["glyphs2ufo", "--keep-corners", "A.glyphs"])
+            .apply_corners
+        )
+
+    def test_apply_corners_still_accepted(self):
+        assert (
+            _build_parser().parse_args(["glyphs2ufo", "--apply-corners", "A.glyphs"]).apply_corners
+        )
+
+    def test_corner_flags_are_exclusive(self):
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(
+                ["glyphs2ufo", "--keep-corners", "--apply-corners", "A.glyphs"]
+            )
 
     def test_verbose_and_quiet_are_exclusive(self):
         with pytest.raises(SystemExit):
@@ -108,6 +127,29 @@ class TestConversion:
         not_glyphs = tmp_path / "font.ufo"
         assert main(["glyphs2ufo", "-q", str(missing), str(not_glyphs), str(one_master)]) == 1
         assert capsys.readouterr().out.strip() == "converted=1 failed=2"
+
+
+class TestCorners:
+    @pytest.fixture
+    def corner_source(self, tmp_path: Path) -> Path:
+        from tests.test_glyphs_corners_hints import _CORNER_SOURCE
+
+        path = tmp_path / "CornerTest.glyphs"
+        path.write_text(_CORNER_SOURCE, encoding="utf-8")
+        return path
+
+    def _points(self, out_dir: Path) -> int:
+        (ufo,) = out_dir.glob("*.ufo")
+        return len(ufoLib2.Font.open(ufo)["A"].contours[0].points)
+
+    def test_corners_are_baked_by_default(self, corner_source, tmp_path):
+        assert main(["glyphs2ufo", "-q", "-o", str(tmp_path / "out"), str(corner_source)]) == 0
+        assert self._points(tmp_path / "out") > 4
+
+    def test_keep_corners_leaves_the_outline_alone(self, corner_source, tmp_path):
+        out = tmp_path / "out"
+        assert main(["glyphs2ufo", "-q", "--keep-corners", "-o", str(out), str(corner_source)]) == 0
+        assert self._points(out) == 4
 
 
 class TestCancel:

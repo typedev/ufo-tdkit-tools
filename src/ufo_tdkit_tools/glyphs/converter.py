@@ -355,6 +355,7 @@ def convert_glyphs_to_ufos(
     from .corners import apply_corner_components
     from .preflight import preflight_source
     from .ps_hints import import_ps_hints as import_ps_hints_into
+    from .ps_hints import reanchor_ps_hints
     from .stem_snaps import clean_stem_snaps
     from .tt_hints import restore_tt_delta_settings
 
@@ -442,14 +443,19 @@ def convert_glyphs_to_ufos(
             # Both passes run here, while the font is still ufoLib2 and still in
             # memory — the corner filter accepts nothing else, and neither pass
             # should ever rewrite a UFO already on disk.
-            if apply_corners:
-                corners_applied += apply_corner_components(source_entry.font)
-
+            #
             # Hand-made PostScript hints come across unconditionally, the way
             # the binary importer brings CFF hints across: writing them adds a
             # lib key and costs nothing when there are none, so there is nothing
-            # for the user to decide.
+            # for the user to decide. They are read BEFORE the corners are
+            # baked: a ghost hint names its node by index, and baking inserts
+            # points, so afterwards the index lands on a different node (a top
+            # ghost at 700 came out at 0).
             ps_hints_imported += import_ps_hints_into(source_entry.font)
+
+            if apply_corners:
+                corners_applied += apply_corner_components(source_entry.font)
+                reanchor_ps_hints(source_entry.font)
 
             # TrueType delta amounts are the one field glyphsLib drops; put it
             # back before the master is written.

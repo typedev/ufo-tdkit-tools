@@ -180,6 +180,12 @@ def process_font(
         # norm for hand-hinted masters, so this is a per-glyph question, not a
         # whole-font one.
         missing = glyphs_missing_source(font, source) if autohint != "off" else []
+        # Glyphs that never reach the binary need no hints, and they are where
+        # the autohinter breaks: Glyphs' corner/cap/part glyphs (`_corner.*`)
+        # are open paths, and otfautohint asserts on open contours.
+        skip_export = set(font.lib.get("public.skipExportGlyphs", []))
+        if skip_export:
+            missing = [name for name in missing if name not in skip_export]
 
         glyphs_total = len(font)
         glyphs_with_hints = count_glyphs_with_source(font, source) if source else 0

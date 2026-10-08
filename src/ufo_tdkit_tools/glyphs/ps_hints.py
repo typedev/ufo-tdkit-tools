@@ -189,3 +189,36 @@ def import_ps_hints(ufo_font) -> int:
     if written:
         logger.info("Imported PostScript hints for %d glyph(s)", written)
     return written
+
+
+def reanchor_ps_hints(ufo_font) -> int:
+    """Point each hint set back at an existing point after outlines changed.
+
+    Baking corner components rebuilds contours around the corner node; when
+    that node was the one the hint set hangs on, its name goes with it and the
+    ``pointTag`` dangles. The stems themselves are coordinates and stay valid.
+
+    Returns:
+        How many glyphs had their hint set re-anchored.
+    """
+    fixed = 0
+    for glyph in ufo_font:
+        hints = glyph.lib.get(ADOBE_HINT_KEY_V2)
+        if not hints:
+            continue
+        names = {p.name for contour in glyph.contours for p in contour.points if p.name}
+        changed = False
+        for hint_set in hints.get("hintSetList", []):
+            tag = hint_set.get("pointTag")
+            if tag and tag in names:
+                continue
+            anchor = _first_oncurve_point(glyph)
+            if anchor is None:
+                continue
+            if not anchor.name:
+                anchor.name = tag or _DEFAULT_POINT_TAG
+                names.add(anchor.name)
+            hint_set["pointTag"] = anchor.name
+            changed = True
+        fixed += changed
+    return fixed

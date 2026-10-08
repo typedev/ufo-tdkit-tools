@@ -48,6 +48,7 @@ class _FakeFont:
         self._glyphs = list(glyphs or [])
         self.layers = [_FakeLayer("public.default", self._glyphs)] + list(extra_layers or [])
         self.info = _Info(None, None)
+        self.lib = {}
 
     def __iter__(self):
         return iter(self._glyphs)

@@ -394,3 +394,42 @@ def test_a_source_without_postscript_hints_gets_no_hint_data(tmp_path: Path):
     assert result.ps_hints_imported == 0
     font = ufoLib2.Font.open(result.open_path)
     assert ADOBE_HINT_KEY_V2 not in font["A"].lib
+
+
+_GHOSTS = """type = Corner;
+},
+{
+horizontal = 1;
+origin = "{0, 2}";
+type = TopGhost;
+},
+{
+horizontal = 1;
+origin = "{0, 0}";
+type = BottomGhost;
+}
+);"""
+
+
+@pytest.mark.parametrize("corner_node", ["{0, 1}", "{0, 3}"])
+def test_ghost_hints_survive_baking_corners(tmp_path: Path, corner_node: str):
+    """Ghosts name their node by index and baking inserts points, so the hints
+    must be read before the bake (a top ghost at 700 came out at 0). With the
+    corner on the contour's first node ({0, 3} in Glyphs order), the point the
+    hint set hangs on is rebuilt too and must be re-anchored."""
+    source = tmp_path / "Ghosts.glyphs"
+    source.write_text(
+        _CORNER_SOURCE.replace('origin = "{0, 1}";', f'origin = "{corner_node}";').replace(
+            "type = Corner;\n}\n);", _GHOSTS
+        ),
+        encoding="utf-8",
+    )
+
+    result = convert_glyphs_to_ufos(source, tmp_path / "out", apply_corners=True)
+
+    assert result.corners_applied == 1
+    glyph = ufoLib2.Font.open(result.open_path)["A"]
+    hint_set = glyph.lib[ADOBE_HINT_KEY_V2]["hintSetList"][0]
+    assert hint_set["stems"] == ["hstem 700 -20", "hstem 0 -21"]
+    names = {p.name for c in glyph.contours for p in c.points if p.name}
+    assert hint_set["pointTag"] in names

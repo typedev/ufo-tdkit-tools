@@ -121,11 +121,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Replace UFOs / .designspace already at the destination. Without it a "
         "source whose outputs exist is skipped and counted as failed.",
     )
-    g2u.add_argument(
-        "--apply-corners",
-        action="store_true",
-        help="Bake corner and cap components into the outlines (cannot be undone).",
+    corners = g2u.add_mutually_exclusive_group()
+    corners.add_argument(
+        "--keep-corners",
+        dest="apply_corners",
+        action="store_false",
+        help="Leave corner/cap components as components instead of baking them "
+        "into the outlines. The UFO then draws without them and does not build "
+        "with process_font (glyphsLib's corner filter rejects defcon fonts).",
     )
+    corners.add_argument(
+        "--apply-corners",
+        dest="apply_corners",
+        action="store_true",
+        help="Bake corner/cap components into the outlines (the default; kept "
+        "for scripts written against 0.4.0).",
+    )
+    g2u.set_defaults(apply_corners=True)
     g2u.add_argument(
         "--dry-run",
         action="store_true",

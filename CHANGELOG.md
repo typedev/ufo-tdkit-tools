@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-08
+
+### Fixed
+
+- **`glyphs2ufo`: Ctrl-C crashed with `KeyError: 'result'` on Python 3.10–3.12** instead of cancelling. The CLI waited on the worker thread with `Thread.join()` / `is_alive()`; before Python 3.13 a `KeyboardInterrupt` inside `join()` corrupts the thread's state, so `is_alive()` reported the still-running conversion as finished. It now waits on an event the worker sets when it is done.
+
 ## [0.4.2] - 2026-10-07
 
 ### Fixed
@@ -110,7 +116,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.3.0...v0.4.0

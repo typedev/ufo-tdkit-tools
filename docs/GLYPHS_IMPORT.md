@@ -291,8 +291,20 @@ ghost hint names its node by index, and baking inserts points, so reading the
 hints afterwards put a top ghost at 700 on the wrong node (`hstem 0 -20`).
 After the bake `reanchor_ps_hints()` moves a hint set whose anchor point was
 rebuilt (a corner on the contour's first node) to the new first on-curve point.
-TrueType hints stay under Glyphs' key with Glyphs node indices; after a bake
-those indices no longer match the outline.
+**Node references are moved with the bake.** TrueType hints (and ghost
+origins) stay under Glyphs' key and name nodes as `[contour, node]` in Glyphs
+order — fields `origin`, `target`, `other1`, `other2`. Baking replaces the
+corner node with several points, so `bake_corner_components()` snapshots each
+hinted glyph first and afterwards moves every reference to the point with the
+same coordinates and kind (on-/off-curve) in the baked outline, converting
+through the closed-contour rotation both ways so `ufo_point_index()` still
+resolves it. A reference to the corner node itself — gone after the bake —
+goes to the nearest point of the same kind and is reported (category
+`hints`): the designer hinted a corner that is now a curve. A glyph whose
+contour count changed is left alone and reported. Without this, a `TTStem`
+target in the test fixture landed on an off-curve point.
+`apply_corner_components()` does the same and logs the warnings;
+`bake_corner_components()` returns them.
 
 Runs `glyphsLib.filters.cornerComponents.CornerComponentsFilter`, then **disarms
 the pass** — and that second half is what makes it correct:

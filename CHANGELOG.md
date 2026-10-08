@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-07
+
+### Fixed
+
+- **Baking corner components left Glyphs TrueType hints on the wrong nodes.** TT hints (`TTStem`, `TTAnchor`, `TTAlign`, `TTInterpolate`, `TTDiagonal`, `TTDelta`) name nodes by index in `origin` / `target` / `other1` / `other2`, and the bake replaces each corner node with several points — in the test fixture a `TTStem` target ended up on an off-curve point. The outline is now snapshotted before the bake and every reference moved to the node with the same coordinates in the baked outline; a reference to the replaced corner node goes to the nearest node and is reported as a `hints` warning.
+
+### Added
+
+- `glyphs.corners.bake_corner_components(ufo_font)` → `(count, warnings)`: `apply_corner_components` plus the warnings about moved hints (which `apply_corner_components` logs). The converter uses it, so the warnings reach `GlyphsConversionResult.warnings`.
+
 ## [0.4.1] - 2026-10-07
 
 ### Fixed
@@ -100,7 +110,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.2.2...v0.3.0

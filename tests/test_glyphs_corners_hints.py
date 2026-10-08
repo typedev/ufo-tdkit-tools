@@ -28,6 +28,7 @@ from ufo_tdkit_tools.glyphs.ps_hints import (  # noqa: E402
     ADOBE_HINT_KEY_V2,
     glyphs_hints_to_stems,
     import_ps_hints,
+    ufo_point_index,
 )
 
 # ---------------------------------------------------------------------------
@@ -433,3 +434,67 @@ def test_ghost_hints_survive_baking_corners(tmp_path: Path, corner_node: str):
     assert hint_set["stems"] == ["hstem 700 -20", "hstem 0 -21"]
     names = {p.name for c in glyph.contours for p in c.points if p.name}
     assert hint_set["pointTag"] in names
+
+
+_TT_HINTS = """type = Corner;
+},
+{
+horizontal = 1;
+origin = "{0, 2}";
+type = TTAnchor;
+},
+{
+horizontal = 0;
+origin = "{0, 0}";
+target = "{0, 3}";
+type = TTStem;
+},
+{
+horizontal = 1;
+origin = "{0, 1}";
+type = TTAlign;
+}
+);"""
+
+
+def _node_at(glyph, ref):
+    contour = glyph.contours[ref[0]]
+    point = contour.points[ufo_point_index(contour, ref[1])]
+    return (point.x, point.y)
+
+
+@pytest.mark.parametrize(
+    "corner_node, expected",
+    [
+        # corner on (400, 0): TTAlign sat on it and moves to the nearest node
+        ("{0, 1}", {"TTAnchor": (400, 700), "TTStem": ((0, 0), (0, 700)), "TTAlign": (300, 0)}),
+        # corner on (0, 700), the contour's first node: TTStem's target moves
+        ("{0, 3}", {"TTAnchor": (400, 700), "TTStem": ((0, 0), (100, 700)), "TTAlign": (400, 0)}),
+    ],
+)
+def test_truetype_hints_follow_their_nodes_through_the_bake(
+    tmp_path: Path, corner_node: str, expected: dict
+):
+    """TT hints name nodes by index; baking inserts points, so every reference
+    is moved to the node with the same coordinates in the baked outline, and a
+    reference to the replaced corner node goes to the nearest one, reported."""
+    source = tmp_path / "TT.glyphs"
+    source.write_text(
+        _CORNER_SOURCE.replace(
+            'origin = "{0, 1}";\ntype = Corner;', f'origin = "{corner_node}";\ntype = Corner;'
+        ).replace("type = Corner;\n}\n);", _TT_HINTS),
+        encoding="utf-8",
+    )
+
+    result = convert_glyphs_to_ufos(source, tmp_path / "out", apply_corners=True)
+
+    glyph = ufoLib2.Font.open(result.open_path)["A"]
+    found = {}
+    for hint in glyph.lib[HINTS_LIB_KEY]:
+        if hint["type"] == "TTStem":
+            found["TTStem"] = (_node_at(glyph, hint["origin"]), _node_at(glyph, hint["target"]))
+        else:
+            found[hint["type"]] = _node_at(glyph, hint["origin"])
+    assert found == expected
+    moved = [w for w in result.warnings if w.category == "hints"]
+    assert len(moved) == 1 and "'A'" in moved[0].message

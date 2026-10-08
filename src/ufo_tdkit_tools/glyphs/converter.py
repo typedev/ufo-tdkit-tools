@@ -352,7 +352,7 @@ def convert_glyphs_to_ufos(
     from glyphsLib import clean_ufo, to_designspace
 
     from .axis_maps import repair_axis_maps
-    from .corners import apply_corner_components
+    from .corners import bake_corner_components
     from .preflight import preflight_source
     from .ps_hints import import_ps_hints as import_ps_hints_into
     from .ps_hints import reanchor_ps_hints
@@ -454,7 +454,9 @@ def convert_glyphs_to_ufos(
             ps_hints_imported += import_ps_hints_into(source_entry.font)
 
             if apply_corners:
-                corners_applied += apply_corner_components(source_entry.font)
+                baked, corner_warnings = bake_corner_components(source_entry.font)
+                corners_applied += baked
+                stem_warnings += corner_warnings
                 reanchor_ps_hints(source_entry.font)
 
             # TrueType delta amounts are the one field glyphsLib drops; put it

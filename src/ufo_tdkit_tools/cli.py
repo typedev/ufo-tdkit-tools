@@ -396,6 +396,7 @@ def _convert_interruptibly(gconv, src: Path, out_dir: Path, args, log):
     import threading
 
     cancel = threading.Event()
+    done = threading.Event()
     outcome: dict = {}
 
     def progress(step: int, total: int, message: str) -> None:
@@ -413,12 +414,17 @@ def _convert_interruptibly(gconv, src: Path, out_dir: Path, args, log):
             )
         except BaseException as exc:  # noqa: BLE001 -- re-raised in the caller
             outcome["error"] = exc
+        finally:
+            done.set()
 
+    # Wait on our own event, not Thread.join/is_alive: before Python 3.13 a
+    # KeyboardInterrupt inside join() corrupts the thread's state and
+    # is_alive() then reports False while the worker is still running.
     worker = threading.Thread(target=work, name=f"glyphs2ufo:{src.name}", daemon=True)
     worker.start()
-    while worker.is_alive():
+    while not done.is_set():
         try:
-            worker.join(0.2)
+            done.wait(0.2)
         except KeyboardInterrupt:
             if cancel.is_set():
                 raise

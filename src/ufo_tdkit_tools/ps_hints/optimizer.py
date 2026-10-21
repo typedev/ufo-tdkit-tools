@@ -529,6 +529,33 @@ _SOFT_DOTTED_BASE = frozenset(
 )
 
 
+def _glyph_for_codepoint(font, cp: int):
+    """The glyph whose primary unicode is ``cp``, or None.
+
+    Looks the codepoint up in defcon's live cmap (``unicodeData``) instead of
+    iterating the font: this runs once per accented glyph, and a full fontParts
+    iteration per call made the accent filter quadratic in the glyph count.
+    Falls back to iteration for font objects without a defcon backend.
+
+    When several glyphs share the primary unicode, the first in ``glyphOrder``
+    wins (then the lowest name). Both the cmap lists and font iteration follow
+    defcon's set-ordered layer, so taking whichever comes first would depend
+    on the string hash seed.
+    """
+    naked = font.naked() if hasattr(font, "naked") else None
+    cmap = getattr(naked, "unicodeData", None)
+    if cmap is None:
+        names = [g.name for g in font if getattr(g, "unicodes", None) and g.unicodes[0] == cp]
+    else:
+        names = [n for n in cmap.get(cp, ()) if n in font and font[n].unicodes[:1] == (cp,)]
+    if not names:
+        return None
+    if len(names) > 1:
+        order = {n: i for i, n in enumerate(font.glyphOrder)}
+        names.sort(key=lambda n: (order.get(n, len(order)), n))
+    return font[names[0]]
+
+
 def _accent_zone_bounds(
     glyph,
     positions: set[str],
@@ -557,11 +584,7 @@ def _accent_zone_bounds(
     )
     if font is not None and base_via_bbox:
         try:
-            for g in font:
-                unis = getattr(g, "unicodes", None)
-                if unis and unis[0] == base_cp:
-                    base_glyph = g
-                    break
+            base_glyph = _glyph_for_codepoint(font, base_cp)
         except Exception:
             base_glyph = None
 

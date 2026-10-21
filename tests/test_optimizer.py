@@ -103,3 +103,23 @@ class TestZeroStemSnaps:
         glyph = _glyph("l", 0x6C, [[(63, 740), (63, 0), (137, 0), (137, 740)]])
         stems = _optimized(glyph, ["vstem 63 74"], snap_v=(0, 0, 0), snap_h=(0, 0))
         assert "vstem 63 74" in stems
+
+
+class TestGlyphForCodepoint:
+    def test_finds_glyph_by_primary_unicode(self):
+        from ufo_tdkit_tools.ps_hints.optimizer import _glyph_for_codepoint
+
+        glyph = _glyph("O", 0x4F, [STEM])
+        font = glyph.font
+        font.newGlyph("Oslash").unicodes = [0xD8, 0x4F]  # 0x4F only secondary
+        assert _glyph_for_codepoint(font, 0x4F).name == "O"
+        assert _glyph_for_codepoint(font, 0x41) is None
+
+    def test_shared_primary_unicode_follows_glyph_order(self):
+        from ufo_tdkit_tools.ps_hints.optimizer import _glyph_for_codepoint
+
+        font = fp.NewFont()
+        for name in ("O.ss01", "O"):
+            font.newGlyph(name).unicodes = [0x4F]
+        font.glyphOrder = ["O", "O.ss01"]
+        assert _glyph_for_codepoint(font, 0x4F).name == "O"

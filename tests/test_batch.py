@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ufo_tdkit_tools.constants import (
     ADOBE_HINT_KEY_V2,
     PROCESSED_LAYER_NAME,
     PUBLIC_PS_HINT_KEY,
 )
 from ufo_tdkit_tools.ps_hints.batch import (
+    _bases_first_order,
     _to_source_string,
     count_glyphs_with_source,
     detect_font_source,
@@ -66,6 +69,34 @@ class _FakeFont:
 
 def _hint_dict():
     return {"hintSetList": [{"stems": ["hstem 0 100"]}]}
+
+
+# ── _bases_first_order ────────────────────────────────────────────────────────
+
+
+class TestBasesFirstOrder:
+    def _font(self, order):
+        fp = pytest.importorskip("fontParts.world")
+        font = fp.NewFont()
+        for name in ("Ohornacute", "acute", "Ohorn", "O", "horn", "zero"):
+            font.newGlyph(name)
+        font["Ohorn"].appendComponent("O")
+        font["Ohorn"].appendComponent("horn")
+        font["Ohornacute"].appendComponent("Ohorn")
+        font["Ohornacute"].appendComponent("acute")
+        font.glyphOrder = order
+        return font
+
+    def test_bases_precede_composites(self):
+        # The composite filter reads the base's already-optimized hints.
+        order = _bases_first_order(self._font(["Ohornacute", "Ohorn", "O", "horn", "acute"]))
+        assert order.index("Ohorn") < order.index("Ohornacute")
+        assert order.index("O") < order.index("Ohorn")
+        assert order.index("horn") < order.index("Ohorn")
+
+    def test_ties_keep_glyph_order_then_name(self):
+        order = _bases_first_order(self._font(["acute", "horn", "O"]))
+        assert order == ["acute", "horn", "O", "zero", "Ohorn", "Ohornacute"]
 
 
 # ── _to_source_string ─────────────────────────────────────────────────────────

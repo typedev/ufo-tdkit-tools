@@ -179,7 +179,8 @@ def optimize_font(font) -> dict[str, int]:
     optimized = 0
     skipped = 0
 
-    for glyph in font:
+    for name in _bases_first_order(font):
+        glyph = font[name]
         hint_data = parse_ps_hints(glyph, HintSource.PROCESSED_LAYER, font=font)
         if not hint_data.hint_sets:
             skipped += 1
@@ -204,6 +205,39 @@ def optimize_font(font) -> dict[str, int]:
             skipped += 1
 
     return {"optimized": optimized, "skipped": skipped}
+
+
+def _bases_first_order(font) -> list[str]:
+    """Glyph names with every base glyph ahead of the composites that use it.
+
+    The optimizer's composite filter compares a composite's vstems with its
+    base glyph's processedglyphs hints, so the base must already be optimized
+    when the composite is reached. Iterating the font directly would not do:
+    defcon keeps a layer's names in a set, so that order changes with the
+    string hash seed and the composites came out different from run to run.
+    Ties keep ``glyphOrder``, with names it does not list sorted after it.
+    """
+    names = set(font.keys())
+    listed = [n for n in font.glyphOrder if n in names]
+    order = listed + sorted(names.difference(listed))
+    depth: dict[str, int] = {}
+
+    def component_depth(name: str, visiting: frozenset[str]) -> int:
+        if name in depth:
+            return depth[name]
+        bases = [
+            c.baseGlyph
+            for c in font[name].components
+            if c.baseGlyph in names and c.baseGlyph not in visiting
+        ]
+        d = 1 + max(component_depth(b, visiting | {name}) for b in bases) if bases else 0
+        depth[name] = d
+        return d
+
+    for n in order:
+        component_depth(n, frozenset())
+    index = {n: i for i, n in enumerate(order)}
+    return sorted(order, key=lambda n: (depth[n], index[n]))
 
 
 def _to_source_string(source: HintSource | str) -> str:

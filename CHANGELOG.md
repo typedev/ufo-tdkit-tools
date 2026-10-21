@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-21
+
+### Fixed
+
+- **`optimize_font` gave different hints from run to run.** It iterated the font directly, and defcon keeps a layer's glyph names in a set, so the order changed with the string hash seed. The composite accent filter compares a composite's vstems with its base glyph's processedglyphs hints, so a composite was checked against its base either before or after the base was optimized — `ohornacute`, `Ohorntilde`, `uni04DF` and similar came out differently between two identical runs. Glyphs are now optimized base glyphs first, ties in `glyphOrder`.
+- **The optimizer's accent-zone filter was quadratic in the glyph count.** It found the base glyph by iterating the whole font once per accented glyph — about 94 s of a 230 s conversion on an Intel N100. It now looks the codepoint up in defcon's `unicodeData`; when several glyphs share the primary unicode, the first in `glyphOrder` is used.
+- **`process_font` crashed on an exported glyph with an open contour.** `otfautohint` asserts on open contours while saving and decomposes composites before hinting them, so one stray two-point path (and every composite using that glyph) failed the whole build with a bare `AssertionError`. Such glyphs are now left unhinted and named in a warning.
+
 ## [0.4.3] - 2026-10-08
 
 ### Fixed
@@ -116,7 +124,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.0...v0.4.1

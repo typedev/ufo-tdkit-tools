@@ -186,6 +186,16 @@ def process_font(
         skip_export = set(font.lib.get("public.skipExportGlyphs", []))
         if skip_export:
             missing = [name for name in missing if name not in skip_export]
+        # Exported glyphs can carry an open contour too (a stray two-point
+        # path left in a source); otfautohint asserts on those while saving and
+        # takes the whole run down. Leave them unhinted and name them.
+        open_paths = _glyphs_with_open_contours(font, missing)
+        if open_paths:
+            log.warning(
+                f"pipeline: not autohinting {len(open_paths)} glyph(s) with open contours "
+                f"(fix the source to hint them): {', '.join(sorted(open_paths))}"
+            )
+            missing = [name for name in missing if name not in set(open_paths)]
 
         glyphs_total = len(font)
         glyphs_with_hints = count_glyphs_with_source(font, source) if source else 0
@@ -396,6 +406,29 @@ def _clean_stem_snaps(font, log: logging.Logger) -> None:
             log.info(f"pipeline: {attr} {list(values)} -> {cleaned or None}")
             if not cleaned:
                 log.warning(f"pipeline: {attr} held no usable values; left unset")
+
+
+def _glyphs_with_open_contours(font, glyph_names: list[str]) -> list[str]:
+    """The names in ``glyph_names`` whose outline has an open contour.
+
+    Components count: otfautohint decomposes a composite before hinting it, so
+    a composite inherits an open contour from any glyph it references.
+    """
+    memo: dict[str, bool] = {}
+
+    def has_open(name: str, visiting: frozenset[str]) -> bool:
+        if name in memo:
+            return memo[name]
+        glyph = font[name]
+        result = any(c.open for c in glyph.contours) or any(
+            has_open(c.baseGlyph, visiting | {name})
+            for c in glyph.components
+            if c.baseGlyph in font and c.baseGlyph not in visiting
+        )
+        memo[name] = result
+        return result
+
+    return [name for name in glyph_names if has_open(name, frozenset())]
 
 
 def _autohint_glyphs(font, glyph_names: list[str], log: logging.Logger):

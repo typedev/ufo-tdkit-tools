@@ -606,6 +606,40 @@ class TestPipelineEndToEnd:
         assert "A" in _hinted_glyphs(tmp_path / "out.otf")
         assert "_corner.round" not in TTFont(str(tmp_path / "out.otf")).getGlyphOrder()
 
+    def test_exported_open_contours_are_not_autohinted(self, tmp_path, caplog):
+        # A stray open path in an exported glyph made otfautohint assert while
+        # saving and failed the whole run; composites using the glyph too,
+        # since the autohinter decomposes them.
+        import defcon
+
+        ufo_in = tmp_path / "in.ufo"
+        _build_minimal_ufo(ufo_in, with_hints=False)
+        font = defcon.Font(str(ufo_in))
+        stray = font.newGlyph("stray")
+        stray.width = 300
+        pen = stray.getPen()
+        pen.moveTo((0, 0))
+        pen.lineTo((100, 100))
+        pen.endPath()
+        pen.moveTo((0, 0))
+        pen.lineTo((0, 300))
+        pen.lineTo((60, 300))
+        pen.lineTo((60, 0))
+        pen.closePath()
+        font.newGlyph("Astray").getPen().addComponent("stray", (1, 0, 0, 1, 0, 0))
+        font.save()
+
+        with caplog.at_level("WARNING"):
+            result = process_font(
+                ufo_in, tmp_path / "out.otf", tmp_path / "out.ufo", autohint="all", optimize=True
+            )
+
+        assert result.success, result.error
+        hinted = _hinted_glyphs(tmp_path / "out.otf")
+        assert "A" in hinted
+        assert "stray" not in hinted
+        assert "Astray, stray" in caplog.text
+
     def test_otf_roundtrip(self, tmp_path):
         # 1. UFO → OTF
         ufo_in = tmp_path / "in.ufo"

@@ -364,8 +364,87 @@ def _rename_glyphs_fallback(shell, ufo, logger=None):
         logger.info(f"Renamed {len(rename_map)} glyphs to production names (fallback)")
 
 
+def _public_ps_to_v2_copy(ufo_path, temp_dir, logger=None):
+    """Give ``tx`` the ``public.postscript.hints`` it cannot read.
+
+    ``tx -t1`` reads only ``com.adobe.type.autohint`` (v1/v2) from the default
+    layer, so a FontLab-style UFO whose hints live in ``public.postscript.hints``
+    compiled with no hints at all. Every glyph that has public hints and no
+    Adobe entry gets them converted to ``autohint.v2`` in a copy of the UFO
+    (an Adobe entry wins when both exist); the source is never written.
+
+    The conversion goes through the processedglyphs layer (point tags are
+    remapped by position there), and that layer must not survive into the
+    copy -- ``tx`` would read its decomposed outlines. A processedglyphs layer
+    already in the source is set aside under another name and restored.
+
+    Returns:
+        ``(path, converted)``: the copy and the number of converted glyphs, or
+        ``(ufo_path, 0)`` when no glyph needs converting.
+    """
+    from defcon import Font
+
+    from ufo_tdkit_tools.constants import (
+        ADOBE_HINT_KEY_V1,
+        ADOBE_HINT_KEY_V2,
+        PROCESSED_LAYER_NAME,
+        PUBLIC_PS_HINT_KEY,
+    )
+
+    names = [
+        glyph.name
+        for glyph in Font(ufo_path)
+        if glyph.lib.get(PUBLIC_PS_HINT_KEY)
+        and ADOBE_HINT_KEY_V2 not in glyph.lib
+        and ADOBE_HINT_KEY_V1 not in glyph.lib
+    ]
+    if not names:
+        return ufo_path, 0
+
+    import fontParts.world as fp
+
+    from ufo_tdkit_tools.ps_hints.converter import export_from_processed, import_to_processed
+
+    copy_path = os.path.join(temp_dir, os.path.basename(os.path.normpath(ufo_path)))
+    shutil.copytree(ufo_path, copy_path)
+    font = fp.OpenFont(copy_path, showInterface=False)
+
+    stashed = None
+    if PROCESSED_LAYER_NAME in [layer.name for layer in font.layers]:
+        stashed = font.getLayer(PROCESSED_LAYER_NAME)
+        stashed.name = PROCESSED_LAYER_NAME + ".preserve-stash"
+
+    converted = 0
+    for name in names:
+        glyph = font[name]
+        if import_to_processed(glyph, font, "public_ps") and export_from_processed(
+            glyph, font, "v2"
+        ):
+            converted += 1
+
+    if PROCESSED_LAYER_NAME in [layer.name for layer in font.layers]:
+        font.removeLayer(PROCESSED_LAYER_NAME)
+    if stashed is not None:
+        stashed.name = PROCESSED_LAYER_NAME
+    font.save()
+    font.close()
+
+    if logger:
+        logger.info(
+            f"Preserve: converted public.postscript.hints -> autohint.v2 for "
+            f"{converted}/{len(names)} glyph(s) without Adobe hints"
+        )
+    return copy_path, converted
+
+
 def compile_otf_preserve(
-    ufo_path, otf_path, logger=None, pshash_rebuild=False, tx_path=None, makeotf_path=None
+    ufo_path,
+    otf_path,
+    logger=None,
+    pshash_rebuild=False,
+    tx_path=None,
+    makeotf_path=None,
+    require_hints=False,
 ):
     """Compile OTF preserving PS hints from UFO.
 
@@ -373,12 +452,15 @@ def compile_otf_preserve(
     charstring merge approach.
 
     Args:
-        ufo_path: Path to UFO source with com.adobe.type.autohint.v2 hints
+        ufo_path: Path to UFO source with ``com.adobe.type.autohint.v2`` or
+            ``public.postscript.hints`` hints
         otf_path: Path for output OTF
         logger: Optional logger
         pshash_rebuild: If True, rebuild processedglyphs layer before compilation
         tx_path: Absolute path to tx binary (for parallel workers)
         makeotf_path: Absolute path to makeotf binary (for parallel workers)
+        require_hints: Fail instead of writing an unhinted OTF when the UFO
+            has no hints at all
 
     Returns:
         True on success, False on failure
@@ -390,6 +472,7 @@ def compile_otf_preserve(
         pshash_rebuild=pshash_rebuild,
         tx_path=tx_path,
         makeotf_path=makeotf_path,
+        require_hints=require_hints,
     )
 
 
@@ -401,6 +484,7 @@ def compile_otf_preserve_optimized(
     tx_path=None,
     makeotf_path=None,
     stats=None,
+    require_hints=False,
 ):
     """Compile OTF preserving PS hints using per-glyph charstring merge.
 
@@ -415,8 +499,17 @@ def compile_otf_preserve_optimized(
     Both compiles keep the UFO's source glyph names, so the merge in step 3
     matches every glyph; production names are applied only in step 5.
 
+    Glyphs hinted only in ``public.postscript.hints`` (FontLab) are converted
+    to ``autohint.v2`` in a temporary copy before step 2, since ``tx`` reads
+    only the Adobe keys; an Adobe entry wins when a glyph has both.
+
+    A UFO with hints from which no hinted charstring comes out is a failure,
+    not an unhinted OTF. A UFO with no hints at all still compiles unhinted
+    unless ``require_hints`` is set.
+
     Args:
-        ufo_path: Path to UFO source with com.adobe.type.autohint.v2 hints
+        ufo_path: Path to UFO source with ``com.adobe.type.autohint.v2`` or
+            ``public.postscript.hints`` hints
         otf_path: Path for output OTF
         logger: Optional logger
         pshash_rebuild: If True, rebuild processedglyphs layer before makeotf
@@ -424,7 +517,10 @@ def compile_otf_preserve_optimized(
         makeotf_path: Absolute path to makeotf binary (for parallel workers)
         stats: Optional mutable dict, filled with
                {'hints_transferred': int, 'total_glyphs': int,
-                'donor_hinted': int, 'name_mismatch': int}
+                'donor_hinted': int, 'name_mismatch': int,
+                'source_hinted': int, 'public_ps_converted': int}
+        require_hints: Fail instead of writing an unhinted OTF when the UFO
+            has no hints at all
 
     Returns:
         True on success, False on failure
@@ -451,15 +547,18 @@ def compile_otf_preserve_optimized(
     try:
         # Step 1: Compile ufo2ft shell
         if logger:
-            logger.info("Preserve-optimized: compiling ufo2ft shell")
+            logger.info("Preserve: compiling ufo2ft shell")
         shell_ufo = _compile_ufo2ft_shell(ufo_path, shell_path, logger)
         if shell_ufo is None:
             return False
 
-        # Step 1.5: Validate hint data
+        # Step 1.5: Validate hint data, after making public.postscript.hints
+        # readable for tx -- the report then describes what tx will see.
+        hinted_ufo_path, public_converted = _public_ps_to_v2_copy(ufo_path, temp_dir, logger)
+
         from ufo_tdkit_tools.ps_hints.validator import validate_ps_hints
 
-        hint_report = validate_ps_hints(ufo_path, logger)
+        hint_report = validate_ps_hints(hinted_ufo_path, logger)
         if not hint_report["valid"]:
             if logger:
                 logger.warning(
@@ -484,10 +583,10 @@ def compile_otf_preserve_optimized(
 
         # Step 2: Compile makeotf without subroutinization
         if logger:
-            logger.info("Preserve-optimized: compiling makeotf (no subroutinization)")
-        makeotf_args = ["-nS", "-f", ufo_path, "-o", hinted_path]
+            logger.info("Preserve: compiling makeotf (no subroutinization)")
+        makeotf_args = ["-nS", "-f", hinted_ufo_path, "-o", hinted_path]
         if not _compile_makeotf_hinted(
-            ufo_path,
+            hinted_ufo_path,
             hinted_path,
             makeotf_args,
             logger,
@@ -495,7 +594,7 @@ def compile_otf_preserve_optimized(
             makeotf_path=makeotf_path,
         ):
             if logger:
-                logger.error("makeotf compilation failed in preserve-optimized mode")
+                logger.error("makeotf compilation failed in preserve mode")
             return False
 
         # Step 3: Per-glyph charstring merge
@@ -515,7 +614,7 @@ def compile_otf_preserve_optimized(
             coverage = 1.0 - len(missing) / len(shell_names)
             log_at = logger.warning if coverage < _NAME_COVERAGE_WARN_RATIO else logger.info
             log_at(
-                f"Preserve-optimized: {len(missing)}/{len(shell_names)} shell glyphs "
+                f"Preserve: {len(missing)}/{len(shell_names)} shell glyphs "
                 f"have no counterpart in the makeotf donor "
                 f"({coverage:.1%} name coverage); their hints cannot be merged. "
                 f"Sample: {missing[:10]}"
@@ -565,7 +664,7 @@ def compile_otf_preserve_optimized(
                 dropped += 1
         if dropped and logger:
             logger.warning(
-                f"Preserve-optimized: {dropped} hinted donor glyph(s) have no shell "
+                f"Preserve: {dropped} hinted donor glyph(s) have no shell "
                 "counterpart and were dropped"
             )
 
@@ -576,14 +675,33 @@ def compile_otf_preserve_optimized(
             stats["total_glyphs"] = len(shell_names)
             stats["donor_hinted"] = donor_hinted + dropped
             stats["name_mismatch"] = len(missing)
+            stats["source_hinted"] = hint_report["glyphs_with_hints"]
+            stats["public_ps_converted"] = public_converted
 
         if logger:
             logger.info(
-                f"Preserve-optimized: transferred {transferred} hinted charstrings "
+                f"Preserve: transferred {transferred} hinted charstrings "
                 f"({transferred}/{len(shell_names)} glyphs)"
             )
 
         if transferred == 0:
+            if hint_report["glyphs_with_hints"]:
+                # The UFO has hints and none reached the binary: shipping the
+                # unhinted shell would lose them silently.
+                if logger:
+                    logger.error(
+                        f"Preserve: {hint_report['glyphs_with_hints']} glyph(s) have hints "
+                        "in the UFO but no hinted charstring came out of makeotf -- "
+                        "refusing to write an unhinted OTF"
+                    )
+                return False
+            if require_hints:
+                if logger:
+                    logger.error(
+                        "Preserve: no hints found in UFO (com.adobe.type.autohint.v2 or "
+                        "public.postscript.hints) and require_hints is set"
+                    )
+                return False
             if logger:
                 logger.warning(
                     "No hinted glyphs found in UFO -- preserve mode has nothing to preserve. "
@@ -596,16 +714,16 @@ def compile_otf_preserve_optimized(
         # Step 5: Production glyph names + cffsubr subroutinization for ~38%
         # smaller CFF. Hints are preserved inside subroutines (callsubr/callgsubr).
         if logger:
-            logger.info("Preserve-optimized: applying production names and subroutinization")
+            logger.info("Preserve: applying production names and subroutinization")
         saved = _finalize_shell(shell, shell_ufo, otf_path, subroutinize=True, logger=logger)
 
         if logger and saved:
-            logger.info(f"Preserve-optimized: saved hybrid OTF: {otf_path}")
+            logger.info(f"Preserve: saved hybrid OTF: {otf_path}")
         return saved
 
     except Exception as e:
         if logger:
-            logger.error(f"Preserve-optimized mode failed: {e}")
+            logger.error(f"Preserve mode failed: {e}")
         traceback.print_exc()
         return False
     finally:

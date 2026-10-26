@@ -167,6 +167,28 @@ def _build_minimal_ufo(
     font.save(str(ufo_path))
 
 
+def _move_hints_to_public(ufo_path):
+    """Rewrite every ``autohint.v2`` entry as FontLab-style public hints.
+
+    FontLab writes ``formatVersion "1"`` and an ``id`` from its own hash
+    algorithm, which never matches :func:`compute_outline_hash`.
+    """
+    import defcon
+
+    from ufo_tdkit_tools.constants import PUBLIC_PS_HINT_KEY
+
+    font = defcon.Font(str(ufo_path))
+    for glyph in font:
+        hints = glyph.lib.pop(ADOBE_HINT_KEY_V2, None)
+        if hints is not None:
+            glyph.lib[PUBLIC_PS_HINT_KEY] = {
+                "formatVersion": "1",
+                "id": "0f" * 20,
+                "hintSetList": hints["hintSetList"],
+            }
+    font.save()
+
+
 _HINT_OP_NAMES = {"hstem", "vstem", "hstemhm", "vstemhm", "hintmask", "cntrmask"}
 
 
@@ -421,6 +443,91 @@ class TestPipelineEndToEnd:
         tt = TTFont(str(otf_out))
         assert "uni0100" in tt.getGlyphOrder()
         tt.close()
+
+    def test_public_ps_hints_survive_preserve_compile(self, tmp_path):
+        """FontLab-style ``public.postscript.hints`` reach the CFF.
+
+        ``tx`` reads only ``autohint.v2``, so a UFO hinted only in the public
+        key used to compile with no hints and fall back to an unhinted OTF.
+        The ``id`` is FontLab's own hash, which never matches ours.
+        """
+        import defcon
+
+        from ufo_tdkit_tools.compilation import compile_otf_preserve_optimized
+        from ufo_tdkit_tools.constants import PROCESSED_LAYER_NAME, PUBLIC_PS_HINT_KEY
+        from ufo_tdkit_tools.ps_hints import validate_ps_hints
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in, with_production_names=True)
+        _move_hints_to_public(ufo_in)
+        before = sorted(p.name for p in (ufo_in / "glyphs").iterdir())
+
+        report = validate_ps_hints(str(ufo_in))
+        assert report["glyphs_with_hints"] == report["glyphs_with_public_ps_hints"] == 2
+
+        stats = {}
+        assert compile_otf_preserve_optimized(str(ufo_in), str(otf_out), stats=stats)
+        assert stats["public_ps_converted"] == 2
+        assert stats["hints_transferred"] == 2
+
+        programs = _desubroutinized_programs(otf_out)
+        assert _declared_stems(programs["A"]) == {"hstem": [(0, 700)], "vstem": [(100, 400)]}
+        assert _declared_stems(programs["uni0100"])["hstem"] == [(0, 900)]
+
+        # The source UFO is left as it was.
+        src = defcon.Font(str(ufo_in))
+        assert ADOBE_HINT_KEY_V2 not in src["A"].lib
+        assert PUBLIC_PS_HINT_KEY in src["A"].lib
+        assert PROCESSED_LAYER_NAME not in src.layers
+        assert sorted(p.name for p in (ufo_in / "glyphs").iterdir()) == before
+
+    def test_v2_wins_over_public_ps_hints(self, tmp_path):
+        """A glyph with both keys compiles from ``autohint.v2``."""
+        import defcon
+
+        from ufo_tdkit_tools.compilation import compile_otf_preserve_optimized
+        from ufo_tdkit_tools.constants import PUBLIC_PS_HINT_KEY
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in)
+        font = defcon.Font(str(ufo_in))
+        font["A"].lib[PUBLIC_PS_HINT_KEY] = {
+            "formatVersion": "1",
+            "hintSetList": [{"pointTag": "hintRef0000", "stems": ["vstem 120 360"]}],
+        }
+        font.save()
+
+        stats = {}
+        assert compile_otf_preserve_optimized(str(ufo_in), str(otf_out), stats=stats)
+        assert stats["public_ps_converted"] == 0
+        stems = _declared_stems(_desubroutinized_programs(otf_out)["A"])
+        assert stems["vstem"] == [(100, 400)]
+
+    def test_hints_lost_in_compile_fail_instead_of_unhinted_otf(self, tmp_path, monkeypatch):
+        """Hints in the UFO and none in the binary is a failure, not a fallback."""
+        from ufo_tdkit_tools.compilation import compiler
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in)
+        _move_hints_to_public(ufo_in)
+        # Reintroduce the old behaviour: tx never sees the public hints.
+        monkeypatch.setattr(compiler, "_public_ps_to_v2_copy", lambda path, *a, **k: (path, 0))
+
+        assert not compiler.compile_otf_preserve_optimized(str(ufo_in), str(otf_out))
+        assert not otf_out.exists()
+
+    def test_require_hints_rejects_unhinted_ufo(self, tmp_path):
+        from ufo_tdkit_tools.compilation import compile_otf_preserve
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in, with_hints=False)
+
+        assert not compile_otf_preserve(str(ufo_in), str(otf_out), require_hints=True)
+        assert not otf_out.exists()
 
     def test_auto_source_picks_v2(self, tmp_path):
         ufo_in = tmp_path / "in.ufo"

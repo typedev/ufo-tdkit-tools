@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-10-26
+
+### Fixed
+
+- **Preserve compile ignored FontLab-style `public.postscript.hints` and shipped an unhinted OTF.** `tx -t1` reads only `com.adobe.type.autohint.v2`, so a UFO hinted only in the public key compiled with zero hinted charstrings and quietly fell back to plain ufo2ft. `compile_otf_preserve(_optimized)` now converts every glyph that has public hints and no Adobe entry to `autohint.v2` in a temporary copy before `tx` runs (an Adobe entry wins when a glyph has both); the source UFO is not touched.
+- **`validate_ps_hints` and `preserve_compile` reported "0 with hints" for such UFOs.** A glyph's hints are now its `autohint.v2` entry, else the v1 key, else `public.postscript.hints`; `preserve_compile` no longer skips them.
+- **Hints lost between the UFO and the binary no longer pass as an unhinted build.** If the UFO has hints and no hinted charstring comes out of `makeotf`, the preserve compile returns `False` instead of writing the unhinted shell.
+
+### Added
+
+- `require_hints=False` on `compile_otf_preserve` / `compile_otf_preserve_optimized`: with `True`, a UFO with no hints at all fails instead of compiling unhinted.
+- `validate_ps_hints` result key `glyphs_with_public_ps_hints`; preserve `stats` keys `source_hinted` and `public_ps_converted`.
+
+### Changed
+
+- Preserve compile log lines start with `Preserve:` instead of `Preserve-optimized:`.
+
 ## [0.4.4] - 2026-10-21
 
 ### Fixed
@@ -124,7 +141,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.1...v0.4.2

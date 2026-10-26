@@ -4,9 +4,10 @@
 """
 Structural validator for PostScript hints in UFO fonts.
 
-Checks ``com.adobe.type.autohint.v2`` entries in each glyph's lib for
-structural correctness and CFF spec compliance. Does not block compilation --
-callers decide whether to abort or continue.
+Checks each glyph's hint entry (``com.adobe.type.autohint.v2``, else
+``public.postscript.hints``) for structural correctness and CFF spec
+compliance. Does not block compilation -- callers decide whether to abort or
+continue.
 """
 
 from __future__ import annotations
@@ -14,8 +15,10 @@ from __future__ import annotations
 import logging
 
 from ufo_tdkit_tools.constants import (
+    ADOBE_HINT_KEY_V1,
     ADOBE_HINT_KEY_V2,
     MAX_STEMS_PER_HINTSET,
+    PUBLIC_PS_HINT_KEY,
     VALID_STEM_TYPES,
 )
 
@@ -25,8 +28,10 @@ logger = logging.getLogger(__name__)
 def validate_ps_hints(ufo_path, logger=None):
     """Validate PS hint data in all glyphs of a UFO.
 
-    Checks ``com.adobe.type.autohint.v2`` entries in each glyph's lib for
-    structural correctness and CFF spec compliance.
+    Checks each glyph's hint entry for structural correctness and CFF spec
+    compliance. The entry is ``com.adobe.type.autohint.v2`` (or the v1 key),
+    else ``public.postscript.hints`` -- the same precedence the preserve
+    compiler uses when it converts FontLab hints for ``tx``.
 
     Args:
         ufo_path: Path to a UFO directory.
@@ -37,6 +42,7 @@ def validate_ps_hints(ufo_path, logger=None):
             "valid": bool,               # False if any errors found
             "glyphs_checked": int,
             "glyphs_with_hints": int,
+            "glyphs_with_public_ps_hints": int,  # of glyphs_with_hints
             "errors": [{"glyph": str, "message": str}, ...],
             "warnings": [{"glyph": str, "message": str}, ...],
         }
@@ -47,12 +53,18 @@ def validate_ps_hints(ufo_path, logger=None):
     errors = []
     warnings = []
     glyphs_with_hints = 0
+    glyphs_with_public = 0
 
     for glyph_name in ufo.keys():
         glyph = ufo[glyph_name]
         hint_data = glyph.lib.get(ADOBE_HINT_KEY_V2)
         if hint_data is None:
-            continue
+            hint_data = glyph.lib.get(ADOBE_HINT_KEY_V1)
+        if hint_data is None:
+            hint_data = glyph.lib.get(PUBLIC_PS_HINT_KEY)
+            if hint_data is None:
+                continue
+            glyphs_with_public += 1
 
         glyphs_with_hints += 1
 
@@ -191,6 +203,7 @@ def validate_ps_hints(ufo_path, logger=None):
         "valid": len(errors) == 0,
         "glyphs_checked": len(ufo.keys()),
         "glyphs_with_hints": glyphs_with_hints,
+        "glyphs_with_public_ps_hints": glyphs_with_public,
         "errors": errors,
         "warnings": warnings,
     }

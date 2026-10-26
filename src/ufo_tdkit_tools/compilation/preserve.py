@@ -79,7 +79,7 @@ class BatchCompileResult:
 
 
 def _check_ufo_has_hints(ufo_path: str) -> tuple[bool, int]:
-    """Check if UFO contains com.adobe.type.autohint.v2 hint data.
+    """Check if UFO contains hint data (``autohint.v2`` or ``public.postscript.hints``).
 
     Returns (has_hints, glyphs_with_hints).
     """
@@ -98,8 +98,9 @@ def preserve_compile(
 ) -> PreserveCompileResult:
     """Compile a single UFO to OTF preserving PS hints.
 
-    Checks for com.adobe.type.autohint.v2 hint data. If found, uses
-    hybrid preserve compilation. If not found, skips with error.
+    Checks for ``com.adobe.type.autohint.v2`` or ``public.postscript.hints``
+    hint data. If found, uses hybrid preserve compilation. If not found, skips
+    with error.
 
     Args:
         ufo_path: Path to UFO source directory.
@@ -125,7 +126,7 @@ def preserve_compile(
 
     if not has_hints:
         result.skipped = True
-        result.error = "No com.adobe.type.autohint.v2 hint data found"
+        result.error = "No hint data found (com.adobe.type.autohint.v2 or public.postscript.hints)"
         return result
 
     # Resolve tool paths

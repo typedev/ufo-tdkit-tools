@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-02
+
+### Fixed
+
+- **Feature code that does not compile no longer yields a featureless OTF.** The ufo2ft shell compile used to retry with empty features "as a last resort" and log one ERROR line, so a UFO whose `features.fea` referenced an undefined glyph class shipped with no GSUB/GDEF and only auto-generated kerning in GPOS. It now raises `FeatureCompilationError` (from the feaLib error, so the message carries `features.fea:line:col`) and writes no OTF. `compile_otf_preserve(_optimized)` let it propagate; `process_font` returns `success=False` with the new `features_failed=True`; `preserve_compile` reports it in `result.error`.
+
+### Added
+
+- `FeatureCompilationError` (exported from `ufo_tdkit_tools.compilation`) and `ProcessResult.features_failed`.
+
 ## [0.4.5] - 2026-10-26
 
 ### Fixed
@@ -141,7 +151,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.2...v0.4.3

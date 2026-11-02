@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-11-02
+
 ### Fixed
 
 - **Corrupted `tx` outlines no longer reach the OTF.** AFDKO `tx` (4.0.3 and 5.0.x, UFO reader) can drop the `moveto` of a contour in a glyph that carries `autohint.v2` hints, merging two contours into one subpath with a stray line between their start points (seen on `AE`, `threequarters`, `Ccedilla`, `Zhecyr`; which glyphs it hits varies with the font and the UFO path). The per-glyph merge copied the donor charstring over the shell without looking at the outline. It now compares the two outlines first (hints ignored). The contour count must match exactly. Each contour must match point by point within 1 unit, or else lie within 2 units of its counterpart. The check tolerates the encoding differences between ufo2ft and `tx`: rounding, explicit closing lines, collinear points and spurs, retracted curves, start point and direction. On a mismatch the merge keeps the ufo2ft outline, hints that glyph with `otfautohint` against the merged Private dict, and logs a WARNING naming the glyphs. Measured on 92k glyphs in 76 UFOs (SchoolBook, Roboto, YS, Nagel, Evacode, MutatorSans): only the corrupted glyphs are rejected; the check adds about 0.1 ms per glyph.
@@ -159,7 +161,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.3...v0.4.4

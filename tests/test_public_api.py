@@ -56,7 +56,7 @@ class TestPipelineApi:
     def test_process_result_fields(self):
         from ufo_tdkit_tools.pipeline import ProcessResult
 
-        assert {"success", "error"} <= _fields(ProcessResult)
+        assert {"success", "error", "features_failed"} <= _fields(ProcessResult)
 
 
 class TestCompilationApi:
@@ -72,6 +72,11 @@ class TestCompilationApi:
 
         for func in (compile_otf_preserve, compile_otf_preserve_optimized):
             assert {"logger", "tx_path", "makeotf_path"} <= _params(func)
+
+    def test_feature_compilation_error_exported(self):
+        from ufo_tdkit_tools.compilation import FeatureCompilationError
+
+        assert issubclass(FeatureCompilationError, RuntimeError)
 
     def test_is_preserve_mode_exported(self):
         from ufo_tdkit_tools.compilation import is_preserve_mode

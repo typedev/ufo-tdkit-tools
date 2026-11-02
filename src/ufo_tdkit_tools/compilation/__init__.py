@@ -14,6 +14,7 @@ def __getattr__(name):
         "compile_otf_preserve",
         "compile_otf_preserve_optimized",
         "is_preserve_mode",
+        "FeatureCompilationError",
     }
     _legacy_kern_names = {
         "add_legacy_kern",
@@ -48,6 +49,7 @@ __all__ = [
     "compile_otf_preserve",
     "compile_otf_preserve_optimized",
     "is_preserve_mode",
+    "FeatureCompilationError",
     "BatchCompileResult",
     "PreserveCompileResult",
     "preserve_compile",

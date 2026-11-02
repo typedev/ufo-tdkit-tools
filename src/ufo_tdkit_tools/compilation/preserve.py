@@ -112,7 +112,10 @@ def preserve_compile(
     Returns:
         PreserveCompileResult with compilation details.
     """
-    from ufo_tdkit_tools.compilation.compiler import compile_otf_preserve_optimized
+    from ufo_tdkit_tools.compilation.compiler import (
+        FeatureCompilationError,
+        compile_otf_preserve_optimized,
+    )
 
     result = PreserveCompileResult(ufo_path=ufo_path)
 
@@ -142,14 +145,20 @@ def preserve_compile(
 
     # Compile
     compile_stats = {}
-    success = compile_otf_preserve_optimized(
-        ufo_path,
-        otf_path,
-        logger=logger,
-        tx_path=_tx,
-        makeotf_path=_mko,
-        stats=compile_stats,
-    )
+    try:
+        success = compile_otf_preserve_optimized(
+            ufo_path,
+            otf_path,
+            logger=logger,
+            tx_path=_tx,
+            makeotf_path=_mko,
+            stats=compile_stats,
+        )
+    except FeatureCompilationError as e:
+        if logger:
+            logger.error(str(e))
+        result.error = str(e)
+        return result
 
     result.success = success
     result.hints_transferred = compile_stats.get("hints_transferred", 0)

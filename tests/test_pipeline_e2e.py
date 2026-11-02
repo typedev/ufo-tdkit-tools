@@ -764,3 +764,59 @@ class TestPipelineEndToEnd:
         assert r2.hint_source_used == "autohint_v2"
         assert otf2.exists()
         assert ufo2.exists()
+
+
+def _break_features(ufo_path):
+    """Reference a glyph class the feature file never defines (a FontLab
+    export that dropped a class whose glyphs the face lacks)."""
+    import defcon
+
+    font = defcon.Font(str(ufo_path))
+    font.features.text = "feature ccmp {\n  sub A @UNDEFINED_ccmp by A;\n} ccmp;\n"
+    font.save()
+
+
+class TestBrokenFeaturesAreFatal:
+    """A feature file that does not compile must never yield a featureless OTF."""
+
+    def test_preserve_compile_raises(self, tmp_path):
+        from ufo_tdkit_tools.compilation import (
+            FeatureCompilationError,
+            compile_otf_preserve_optimized,
+        )
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in)
+        _break_features(ufo_in)
+
+        with pytest.raises(FeatureCompilationError, match="UNDEFINED_ccmp"):
+            compile_otf_preserve_optimized(str(ufo_in), str(otf_out))
+        assert not otf_out.exists()
+
+    def test_process_font_reports_features_failed(self, tmp_path):
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in)
+        _break_features(ufo_in)
+
+        result = process_font(ufo_in, otf_out, tmp_path / "out.ufo", hint_source="v2")
+
+        assert not result.success
+        assert result.features_failed
+        assert "UNDEFINED_ccmp" in result.error
+        assert not otf_out.exists()
+
+    def test_preserve_compile_wrapper_reports_error(self, tmp_path):
+        from ufo_tdkit_tools.compilation import preserve_compile
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in)
+        _break_features(ufo_in)
+
+        result = preserve_compile(str(ufo_in), str(otf_out))
+
+        assert not result.success
+        assert "UNDEFINED_ccmp" in result.error
+        assert not otf_out.exists()

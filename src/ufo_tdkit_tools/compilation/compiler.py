@@ -43,6 +43,29 @@ def is_preserve_mode(pshinter):
     return isinstance(pshinter, str) and pshinter in ("preserve", "preserve-optimized")
 
 
+class FeatureCompilationError(RuntimeError):
+    """The UFO's feature code does not compile; no OTF is written.
+
+    There is deliberately no "compile without features" fallback: it would
+    ship an OTF with no GSUB/GDEF and only the auto-generated kerning in GPOS,
+    and nothing about the file says so. Callers must let this propagate (or
+    report the face as failed), never retry around it.
+    """
+
+
+def _is_feature_error(exc):
+    """True if ``exc`` (or anything in its cause/context chain) is a feaLib error."""
+    from fontTools.feaLib.error import FeatureLibError
+
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, FeatureLibError):
+            return True
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
     """Compile UFO to OTF using ufo2ft (correct metadata tables, no PS hints).
 
@@ -53,8 +76,6 @@ def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
     every renamed glyph. Production names are applied after the merge by
     :func:`_finalize_shell`, exactly as a plain ``compileOTF`` would.
 
-    Handles feature compilation errors by retrying with empty features.
-
     Args:
         ufo_path: Path to UFO source
         output_path: Path for output OTF
@@ -64,37 +85,27 @@ def _compile_ufo2ft_shell(ufo_path, output_path, logger=None):
         The :class:`defcon.Font` the shell was built from (truthy) on success,
         ``None`` on failure. The font is needed later to reproduce ufo2ft's
         production-name mapping.
+
+    Raises:
+        FeatureCompilationError: the feature code does not compile (unknown
+            glyph class, missing glyph, unresolved ``include()``, syntax error).
     """
     from defcon import Font
     from ufo2ft import compileOTF
 
     try:
         ufo = Font(ufo_path)
-        try:
-            # optimizeCFF=1: specialize charstrings but skip subroutinization.
-            # The shell's charstrings will be replaced by hinted versions from makeotf,
-            # so subroutinization here would only create dangling subrs in the CFF table.
-            otf = compileOTF(ufo, optimizeCFF=1, useProductionNames=False)
-        except Exception as e:
-            # LAST-RESORT fallback: produce *some* OTF rather than fail the build.
-            # This DROPS the entire feature set (GSUB + explicit GPOS features),
-            # so it must never pass silently — the usual trigger is an unresolved
-            # feature include() after the UFO was relocated to a temp dir. Escalate
-            # loudly so the layout loss is visible in the log, not discovered later
-            # in the shipped binary.
-            if logger:
-                logger.error(
-                    f"Feature compilation FAILED ({e}); recompiling WITHOUT features "
-                    f"as a last resort — the resulting OTF will have NO GSUB and only "
-                    f"auto-generated GPOS. Check for unresolved include() paths in "
-                    f"{ufo_path}."
-                )
-            ufo = Font(ufo_path)
-            ufo.features.text = ""
-            otf = compileOTF(ufo, optimizeCFF=1, useProductionNames=False)
+        # optimizeCFF=1: specialize charstrings but skip subroutinization.
+        # The shell's charstrings will be replaced by hinted versions from makeotf,
+        # so subroutinization here would only create dangling subrs in the CFF table.
+        otf = compileOTF(ufo, optimizeCFF=1, useProductionNames=False)
         otf.save(output_path)
         return ufo
     except Exception as e:
+        if _is_feature_error(e):
+            # No fallback: compiling without features would ship an OTF with
+            # no GSUB/GDEF and only auto-generated kerning, silently.
+            raise FeatureCompilationError(str(e)) from e
         if logger:
             logger.error(f"ufo2ft compilation failed: {e}")
         traceback.print_exc()
@@ -464,6 +475,9 @@ def compile_otf_preserve(
 
     Returns:
         True on success, False on failure
+
+    Raises:
+        FeatureCompilationError: the UFO's feature code does not compile.
     """
     return compile_otf_preserve_optimized(
         ufo_path,
@@ -524,6 +538,9 @@ def compile_otf_preserve_optimized(
 
     Returns:
         True on success, False on failure
+
+    Raises:
+        FeatureCompilationError: the UFO's feature code does not compile.
     """
     PRIVATE_HINT_ATTRS = [
         "BlueValues",
@@ -721,6 +738,10 @@ def compile_otf_preserve_optimized(
             logger.info(f"Preserve: saved hybrid OTF: {otf_path}")
         return saved
 
+    except FeatureCompilationError:
+        # Not a preserve-mode problem and not recoverable here: the caller
+        # must fail the face instead of falling back to another compiler.
+        raise
     except Exception as e:
         if logger:
             logger.error(f"Preserve mode failed: {e}")

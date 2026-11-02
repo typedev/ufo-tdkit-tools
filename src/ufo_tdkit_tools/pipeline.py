@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from ufo_tdkit_tools.compilation.compiler import FeatureCompilationError
 from ufo_tdkit_tools.constants import (
     ADOBE_HINT_KEY_V2,
     PROCESSED_LAYER_NAME,
@@ -48,6 +49,10 @@ class ProcessResult:
     otf_glyphs_hinted: int = 0
     otf_glyphs_total: int = 0
     error: str | None = None
+    #: The UFO's feature code does not compile, so no OTF was written. Not a
+    #: hinting problem: a caller must not retry with another hinting route,
+    #: since every compiler fails on the same features.
+    features_failed: bool = False
 
 
 def process_font(
@@ -115,7 +120,9 @@ def process_font(
         logger_: Optional logger; defaults to module logger.
 
     Returns:
-        :class:`ProcessResult` with success flag and statistics.
+        :class:`ProcessResult` with success flag and statistics. When the
+        feature code does not compile, ``success`` is False and
+        ``features_failed`` is True; there is no featureless fallback OTF.
     """
     log = logger_ or logger
     if autohint not in ("fill", "all", "off"):
@@ -299,6 +306,9 @@ def process_font(
             f"(hinted {result.otf_glyphs_hinted}/{result.otf_glyphs_total} glyphs)"
         )
         return result
+    except FeatureCompilationError as e:
+        log.error(f"pipeline: {e}")
+        return ProcessResult(success=False, error=str(e), features_failed=True)
     except Exception as e:
         log.exception("pipeline: unexpected failure")
         return ProcessResult(success=False, error=f"{type(e).__name__}: {e}")

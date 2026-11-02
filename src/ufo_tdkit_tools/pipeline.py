@@ -294,7 +294,8 @@ def process_font(
             optimized_count=optimized_count,
             autohinted=autohinted,
             autohinted_count=autohinted_count,
-            otf_glyphs_hinted=compile_stats.get("hints_transferred", 0),
+            otf_glyphs_hinted=compile_stats.get("hints_transferred", 0)
+            + compile_stats.get("outline_rehinted", 0),
             otf_glyphs_total=compile_stats.get("total_glyphs", 0),
         )
         if not ok:

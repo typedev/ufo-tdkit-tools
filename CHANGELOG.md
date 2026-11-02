@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Corrupted `tx` outlines no longer reach the OTF.** AFDKO `tx` (4.0.3 and 5.0.x, UFO reader) can drop the `moveto` of a contour in a glyph that carries `autohint.v2` hints, merging two contours into one subpath with a stray line between their start points (seen on `AE`, `threequarters`, `Ccedilla`, `Zhecyr`; which glyphs it hits varies with the font and the UFO path). The per-glyph merge copied the donor charstring over the shell without looking at the outline. It now compares the two outlines first (hints ignored). The contour count must match exactly. Each contour must match point by point within 1 unit, or else lie within 2 units of its counterpart. The check tolerates the encoding differences between ufo2ft and `tx`: rounding, explicit closing lines, collinear points and spurs, retracted curves, start point and direction. On a mismatch the merge keeps the ufo2ft outline, hints that glyph with `otfautohint` against the merged Private dict, and logs a WARNING naming the glyphs. Measured on 92k glyphs in 76 UFOs (SchoolBook, Roboto, YS, Nagel, Evacode, MutatorSans): only the corrupted glyphs are rejected; the check adds about 0.1 ms per glyph.
+
+### Added
+
+- Preserve `stats` keys `outline_mismatch` (donor glyphs rejected for a wrong outline) and `outline_rehinted` (how many of those came back hinted). `ProcessResult.otf_glyphs_hinted` counts the re-hinted glyphs.
+
 ## [0.4.6] - 2026-11-02
 
 ### Fixed

@@ -505,6 +505,56 @@ class TestPipelineEndToEnd:
         stems = _declared_stems(_desubroutinized_programs(otf_out)["A"])
         assert stems["vstem"] == [(100, 400)]
 
+    def test_donor_with_wrong_outline_is_rejected_and_rehinted(self, tmp_path, monkeypatch):
+        """A donor charstring whose outline differs from the UFO never ships.
+
+        AFDKO ``tx`` can drop a contour's ``moveto`` and merge two contours.
+        The merge must keep the shell's (exact) outline for such a glyph and
+        hint it with otfautohint instead, and say so in the stats.
+        """
+        from fontTools.pens.recordingPen import RecordingPen
+
+        from ufo_tdkit_tools.compilation import compiler
+
+        real_makeotf = compiler._compile_makeotf_hinted
+
+        def corrupting_makeotf(ufo_path, output_path, *args, **kwargs):
+            ok = real_makeotf(ufo_path, output_path, *args, **kwargs)
+            donor = TTFont(output_path)
+            charstring = donor["CFF "].cff.topDictIndex[0].CharStrings["A"]
+            charstring.decompile()
+            program = charstring.program
+            # Push the first corner after the moveto 30 units off: the hints
+            # stay, the outline is wrong.
+            index = next(i for i, op in enumerate(program) if op in ("hmoveto", "rmoveto"))
+            program[index + 1] += 30
+            donor.save(output_path)
+            donor.close()
+            return ok
+
+        monkeypatch.setattr(compiler, "_compile_makeotf_hinted", corrupting_makeotf)
+
+        ufo_in = tmp_path / "in.ufo"
+        otf_out = tmp_path / "out.otf"
+        _build_minimal_ufo(ufo_in)
+        stats = {}
+
+        assert compiler.compile_otf_preserve_optimized(str(ufo_in), str(otf_out), stats=stats)
+
+        assert stats["outline_mismatch"] == 1
+        assert stats["outline_rehinted"] == 1
+        assert stats["hints_transferred"] == 0
+
+        tt = TTFont(str(otf_out))
+        pen = RecordingPen()
+        tt.getGlyphSet()["A"].draw(pen)
+        points = {args[0] for op, args in pen.value if op in ("moveTo", "lineTo")}
+        tt.close()
+        assert points == {(100, 0), (500, 0), (500, 700), (100, 700)}
+
+        program = _desubroutinized_programs(otf_out)["A"]
+        assert any(isinstance(op, str) and op in compiler.HINT_OPS for op in program)
+
     def test_hints_lost_in_compile_fail_instead_of_unhinted_otf(self, tmp_path, monkeypatch):
         """Hints in the UFO and none in the binary is a failure, not a fallback."""
         from ufo_tdkit_tools.compilation import compiler

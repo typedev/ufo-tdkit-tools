@@ -311,6 +311,308 @@ def _split_width_prefix(program):
     return [], list(program)
 
 
+# Per-coordinate slack when comparing donor and shell outlines: both round
+# fractional source coordinates, but not always to the same integer.
+_OUTLINE_TOLERANCE = 1
+# Distance allowed between two contours that do not match point by point:
+# each side may round a point one step off, in opposite directions.
+_OUTLINE_DISTANCE_TOLERANCE = 2 * _OUTLINE_TOLERANCE
+# Longest flattening step for curves in the geometric comparison.
+_FLATTEN_STEP = 10
+
+
+def _outlines_match(a, b, tolerance=_OUTLINE_TOLERANCE):
+    """True if two charstrings draw the same outline, hints ignored.
+
+    Used to check that the makeotf donor drew the same glyph as the ufo2ft
+    shell before the donor's charstring replaces the shell's. AFDKO ``tx``
+    (4.x and 5.x, UFO reader) can drop the ``moveto`` of a contour when the
+    glyph carries ``autohint.v2`` hints, merging two contours into one
+    subpath; which glyphs it hits varies with the font and the UFO path.
+
+    Both compiles draw the same UFO, but legitimately differ in encoding:
+
+    - ``tx`` keeps fractional coordinates, ufo2ft rounds them, and the two do
+      not always round to the same integer; a segment that rounds to zero
+      length is dropped by ufo2ft and kept by ``tx``.
+    - ``tx`` writes the closing ``lineto`` back to the start point explicitly.
+    - ufo2ft drops the interior points of straight runs (also points a
+      rounding step off the line, and spurs that run back along it) and writes
+      a curve whose handles sit on its end points as a line; ``tx`` keeps
+      both.
+    - ufo2ft reverses mirrored components (negative scale) to keep the outline
+      direction, ``tx`` does not -- the same contour then starts elsewhere and
+      runs the other way.
+
+    So the contours are normalized (see :func:`_outline_contours`) and matched
+    one to one, each up to its start point and direction: first point by
+    point (segment types equal, every point within ``tolerance`` per
+    coordinate), and for the few contours left over -- where the two sides
+    decided differently whether a point near a straight line is a corner --
+    geometrically, every point of each contour within
+    ``_OUTLINE_DISTANCE_TOLERANCE`` of the other. The contour count must
+    agree exactly, which is what a merged contour breaks.
+
+    Args:
+        a: A fontTools ``T2CharString``.
+        b: Another one.
+        tolerance: Allowed difference per coordinate, in font units.
+
+    Returns:
+        True if the outlines match.
+    """
+    contours_a = _outline_contours(a, tolerance)
+    contours_b = _outline_contours(b, tolerance)
+    if len(contours_a) != len(contours_b):
+        return False
+    unused = list(contours_b)
+    leftover = []
+    for contour in contours_a:
+        for i, other in enumerate(unused):
+            if _contours_match(contour, other, tolerance):
+                del unused[i]
+                break
+        else:
+            leftover.append(contour)
+    for contour in leftover:
+        for i, other in enumerate(unused):
+            if _contours_near(contour, other, _OUTLINE_DISTANCE_TOLERANCE):
+                del unused[i]
+                break
+        else:
+            return False
+    return True
+
+
+def _outline_contours(charstring, tolerance=0):
+    """Closed contours of a charstring as normalized lists of segments.
+
+    A segment is a tuple of points from its start on-curve point to its end
+    on-curve point (2 points: line, 4: cubic). Coordinates are rounded with
+    ``otRound``; curves whose handles sit on their end points become lines,
+    segments no longer than ``tolerance`` per coordinate (including the
+    closing one) are dropped -- one compile may round a tiny segment to zero
+    and the other to one unit -- and straight runs whose interior points are
+    within ``2 * tolerance`` of the line are joined.
+    """
+    from fontTools.misc.roundTools import otRound
+    from fontTools.pens.recordingPen import RecordingPen
+
+    pen = RecordingPen()
+    charstring.draw(pen)
+
+    def pt(p):
+        return (otRound(p[0]), otRound(p[1]))
+
+    def degenerate(seg):
+        xs = [p[0] for p in seg]
+        ys = [p[1] for p in seg]
+        return max(xs) - min(xs) <= tolerance and max(ys) - min(ys) <= tolerance
+
+    contours = []
+    segments = []
+    current = start = None
+
+    def close():
+        if current is not None and start is not None:
+            if not degenerate((current, start)):
+                segments.append((current, start))
+        if segments:
+            # Twice the slack: each compile may round the point a step off the line.
+            contours.append(_merge_collinear_lines(segments, 2 * tolerance))
+
+    for op, args in pen.value:
+        if op == "moveTo":
+            close()
+            segments = []
+            current = start = pt(args[0])
+        elif op == "lineTo":
+            seg = (current, pt(args[0]))
+            if not degenerate(seg):
+                segments.append(seg)
+                current = seg[-1]
+        elif op in ("curveTo", "qCurveTo"):
+            seg = (current,) + tuple(pt(p) for p in args)
+            if set(seg[1:-1]) <= {seg[0], seg[-1]}:
+                # Handles retracted onto the end points: a straight line.
+                seg = (seg[0], seg[-1])
+            if not degenerate(seg):
+                segments.append(seg)
+                current = seg[-1]
+        elif op in ("closePath", "endPath"):
+            close()
+            segments = []
+            current = start = None
+    close()
+    return contours
+
+
+def _merge_collinear_lines(segments, tolerance=0):
+    """Join consecutive straight segments that lie on one line.
+
+    ufo2ft drops the interior on-curve points of straight runs, ``tx`` keeps
+    them -- including a point that is off the line by a rounding step, or a
+    spur that overshoots and runs back along the same line. A point is
+    interior when it is within ``tolerance`` of the line through its
+    neighbours. Runs that wrap around the contour's start point are joined as
+    well.
+    """
+
+    def continues(a, b):
+        if len(a) != 2 or len(b) != 2:
+            return False
+        (x0, y0), (x1, y1) = a
+        (x2, y2) = b[1]
+        dx, dy = x2 - x0, y2 - y0
+        if dx == 0 and dy == 0:
+            return False
+        cross = dx * (y1 - y0) - dy * (x1 - x0)
+        return cross * cross <= tolerance * tolerance * (dx * dx + dy * dy)
+
+    merged = []
+    for seg in segments:
+        if merged and continues(merged[-1], seg):
+            merged[-1] = (merged[-1][0], seg[1])
+        else:
+            merged.append(seg)
+    while len(merged) > 1 and continues(merged[-1], merged[0]):
+        merged[0] = (merged[-1][0], merged[0][1])
+        merged.pop()
+    return merged
+
+
+def _contours_match(a, b, tolerance):
+    """True if contour ``b`` is ``a`` up to start point, direction and slack."""
+    if len(a) != len(b):
+        return False
+
+    def near(p, q):
+        return abs(p[0] - q[0]) <= tolerance and abs(p[1] - q[1]) <= tolerance
+
+    reverse = [tuple(reversed(seg)) for seg in reversed(b)]
+    n = len(a)
+    for seq in (b, reverse):
+        for shift in range(n):
+            if all(
+                len(a[k]) == len(seq[(k + shift) % n])
+                and all(near(p, q) for p, q in zip(a[k], seq[(k + shift) % n]))
+                for k in range(n)
+            ):
+                return True
+    return False
+
+
+def _flatten_contour(segments):
+    """Polyline through a contour, curves split into steps of at most _FLATTEN_STEP."""
+    import math
+
+    points = []
+    for seg in segments:
+        if len(seg) == 2:
+            points.append(seg[0])
+            continue
+        p0, p1, p2, p3 = seg
+        hull = sum(math.dist(u, v) for u, v in zip(seg, seg[1:]))
+        steps = max(2, math.ceil(hull / _FLATTEN_STEP))
+        for k in range(steps):
+            t = k / steps
+            mt = 1 - t
+            points.append(
+                tuple(
+                    mt**3 * p0[i] + 3 * mt * mt * t * p1[i] + 3 * mt * t * t * p2[i] + t**3 * p3[i]
+                    for i in (0, 1)
+                )
+            )
+    return points
+
+
+def _contours_near(a, b, distance):
+    """True if every point of each contour's polyline is within ``distance`` of the other."""
+    poly_a = _flatten_contour(a)
+    poly_b = _flatten_contour(b)
+    return _polyline_within(poly_a, poly_b, distance) and _polyline_within(poly_b, poly_a, distance)
+
+
+def _polyline_within(points, polyline, distance):
+    """True if every point lies within ``distance`` of the closed ``polyline``."""
+    limit = distance * distance
+    edges = list(zip(polyline, polyline[1:] + polyline[:1]))
+    # The polylines are dense (curve steps of _FLATTEN_STEP units), so testing
+    # the vertices of one against the edges of the other is enough.
+    for px, py in points:
+        for (x0, y0), (x1, y1) in edges:
+            dx, dy = x1 - x0, y1 - y0
+            length2 = dx * dx + dy * dy
+            t = 0.0 if length2 == 0 else ((px - x0) * dx + (py - y0) * dy) / length2
+            t = min(1.0, max(0.0, t))
+            ex, ey = x0 + t * dx - px, y0 + t * dy - py
+            if ex * ex + ey * ey <= limit:
+                break
+        else:
+            return False
+    return True
+
+
+def _autohint_shell_glyphs(shell, glyph_names, temp_dir, logger=None):
+    """Hint ``glyph_names`` in the shell in place with ``afdko.otfautohint``.
+
+    The shell is saved as-is (its Private dict already holds the donor's blue
+    zones and stem snaps), hinted with ``glyphList`` restricted to
+    ``glyph_names``, and the resulting charstrings are copied back. Each glyph
+    keeps the shell's own width operand. A failure is logged and leaves the
+    glyphs unhinted -- their outlines are still correct.
+
+    Args:
+        shell: The shell ``TTFont`` (modified in place).
+        glyph_names: Glyphs to hint.
+        temp_dir: Scratch directory for the intermediate fonts.
+        logger: Optional logger.
+
+    Returns:
+        Number of glyphs that came back hinted.
+    """
+    src = os.path.join(temp_dir, "rehint_in.otf")
+    dst = os.path.join(temp_dir, "rehint_out.otf")
+    try:
+        from afdko.otfautohint.autohint import ACOptions, hintFiles
+
+        shell.save(src)
+        options = ACOptions()
+        options.inputPaths = [src]
+        options.outputPaths = [dst]
+        options.allowNoBlues = True
+        options.glyphList = list(glyph_names)
+        options.explicitGlyphs = True
+        hintFiles(options)
+
+        rehinted_font = TTFont(dst)
+        source_cs = rehinted_font["CFF "].cff.topDictIndex[0].CharStrings
+        shell_cs = shell["CFF "].cff.topDictIndex[0].CharStrings
+        count = 0
+        for name in glyph_names:
+            donor = source_cs[name]
+            donor.decompile()
+            if not any(isinstance(op, str) and op in HINT_OPS for op in donor.program):
+                continue
+            target = shell_cs[name]
+            target.decompile()
+            width, _ = _split_width_prefix(target.program)
+            _, body = _split_width_prefix(donor.program)
+            target.program = width + body
+            count += 1
+        rehinted_font.close()
+    except Exception as e:
+        if logger:
+            logger.warning(f"Preserve: otfautohint failed on {glyph_names}, left unhinted: {e}")
+        return 0
+    if logger and count < len(glyph_names):
+        logger.warning(
+            f"Preserve: otfautohint hinted {count}/{len(glyph_names)} re-hinted glyph(s); "
+            "the rest are unhinted"
+        )
+    return count
+
+
 def _finalize_shell(shell, ufo, otf_path, subroutinize, logger=None):
     """Apply production glyph names (and optionally subroutinize), then save.
 
@@ -532,7 +834,13 @@ def compile_otf_preserve_optimized(
         stats: Optional mutable dict, filled with
                {'hints_transferred': int, 'total_glyphs': int,
                 'donor_hinted': int, 'name_mismatch': int,
-                'source_hinted': int, 'public_ps_converted': int}
+                'source_hinted': int, 'public_ps_converted': int,
+                'outline_mismatch': int, 'outline_rehinted': int}.
+               ``hints_transferred`` counts donor charstrings merged into
+               the shell; ``outline_mismatch`` the hinted donor glyphs
+               rejected because their outline differs from the shell's (the
+               shell outline is kept), ``outline_rehinted`` how many of those
+               were then hinted by otfautohint.
         require_hints: Fail instead of writing an unhinted OTF when the UFO
             has no hints at all
 
@@ -639,6 +947,7 @@ def compile_otf_preserve_optimized(
 
         transferred = 0
         donor_hinted = 0
+        outline_mismatch = []
         for glyph_name in shell_names:
             if glyph_name not in hinted_cs:
                 continue
@@ -651,6 +960,12 @@ def compile_otf_preserve_optimized(
                 donor_hinted += 1
                 shell_charstring = shell_cs[glyph_name]
                 shell_charstring.decompile()
+                # The donor must draw the same outline as the shell. AFDKO tx
+                # can merge two contours into one subpath (dropped moveto);
+                # the shell is exact, so keep it and re-hint it below.
+                if not _outlines_match(hinted_charstring, shell_charstring):
+                    outline_mismatch.append(glyph_name)
+                    continue
                 # Keep the SHELL's width operand: the donor encodes its width
                 # against its own Private.nominalWidthX / defaultWidthX, which
                 # the merge does not carry over, so reusing the donor's prefix
@@ -667,6 +982,19 @@ def compile_otf_preserve_optimized(
             hinted_val = getattr(hinted_private, attr, None)
             if hinted_val is not None:
                 setattr(shell_private, attr, hinted_val)
+
+        # Step 4.5: hint the glyphs whose donor outline was rejected, now
+        # that the shell carries the donor's blue zones and stem snaps.
+        rehinted = 0
+        if outline_mismatch:
+            if logger:
+                logger.warning(
+                    f"Preserve: {len(outline_mismatch)} glyph(s) came out of tx/makeotf "
+                    "with an outline that differs from the UFO (likely the AFDKO tx "
+                    "contour-merge bug); kept the ufo2ft outline and re-hinting them "
+                    f"with otfautohint: {outline_mismatch}"
+                )
+            rehinted = _autohint_shell_glyphs(shell, outline_mismatch, temp_dir, logger)
 
         # Hinted donor glyphs the shell does not know about — the mirror image
         # of the name-coverage warning above, and the symptom of a namespace
@@ -694,6 +1022,8 @@ def compile_otf_preserve_optimized(
             stats["name_mismatch"] = len(missing)
             stats["source_hinted"] = hint_report["glyphs_with_hints"]
             stats["public_ps_converted"] = public_converted
+            stats["outline_mismatch"] = len(outline_mismatch)
+            stats["outline_rehinted"] = rehinted
 
         if logger:
             logger.info(
@@ -701,7 +1031,7 @@ def compile_otf_preserve_optimized(
                 f"({transferred}/{len(shell_names)} glyphs)"
             )
 
-        if transferred == 0:
+        if transferred + rehinted == 0:
             if hint_report["glyphs_with_hints"]:
                 # The UFO has hints and none reached the binary: shipping the
                 # unhinted shell would lose them silently.

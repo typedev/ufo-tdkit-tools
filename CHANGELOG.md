@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-11-05
+
 ### Added
 
 - **`analyze_glyph` checks overlaps within each hint set.** New tags `overlap-set-v` / `overlap-set-h` report two hints of the same set whose ranges overlap (Type 2 #5177 §4.3: undefined results). Ghosts count, with their single edge as the extent (`700 -20` → 700, `21 -21` → 0), so a ghost inside a real stem is caught; touching edges are not an overlap. The detail names the set (`set 1 (hintRef0004): hstem 663 52 / hstem 700 -20`). The existing `centric-overlap` / `overlap-v` / `overlap-h` are unchanged: they still pool all sets and skip ghosts, i.e. they flag what the optimizer will collapse, which may be legal hint replacement across sets.
@@ -165,7 +167,8 @@ First release published on PyPI.
 - `ps_hints` module: PS hint parsing, optimization, layer conversion, and structural validation
 - `compilation` module: UFO to OTF compilation with PS hint preservation (preserve-optimized mode)
 
-[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/typedev/ufo-tdkit-tools/compare/v0.4.4...v0.4.5

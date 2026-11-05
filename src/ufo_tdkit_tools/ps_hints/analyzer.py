@@ -10,6 +10,13 @@ Detects optimization opportunities in PS hint data:
 2. Overlapping vstems (same-side and cross-side/centric)
 3. Overlapping hstems
 4. Potential vstem3 candidates (3 equally-spaced similar-width vstems)
+5. Overlapping hints within one hint set, ghosts included
+
+Checks 1-4 pool the stems of all hint sets, as the optimizer does when it
+flattens a glyph to one clean set: their overlaps may sit in different sets,
+which is legal hint replacement. Check 5 looks at one set at a time, where an
+overlap is an error (Type 2 Charstring Format, #5177 section 4.3: overlapping
+hints in one active set give undefined results).
 """
 
 from __future__ import annotations
@@ -48,6 +55,14 @@ def analyze_glyph(
         overlap-v: same-side vstem overlap
         overlap-h: hstem overlap
         potential-vstem3: 3 vstems matching Adobe stem3 constraints
+        overlap-set-v: two vstems of the same hint set overlap
+        overlap-set-h: two hstems of the same hint set overlap
+
+    The centric-overlap / overlap-v / overlap-h checks pool the stems of all
+    hint sets, so their pairs may come from different sets (legal hint
+    replacement, but the optimizer keeps only one). overlap-set-v / overlap-set-h
+    compare the stems of one set only, ghosts included with their single edge
+    as the extent; such a pair is invalid in the charstring.
     """
     if not hint_data.hint_sets:
         return None
@@ -168,7 +183,61 @@ def analyze_glyph(
                         )
                     )
 
+    issues.extend(_set_overlaps(hint_data))
+
     return issues if issues else None
+
+
+def _hint_extents(stem) -> list[tuple[float, float]]:
+    """Return the (low, high) edge ranges a hint controls.
+
+    A ghost controls a single edge: the top/right ghost (width -20) sits at its
+    position, the bottom/left ghost (width -21) at position - 21. A triple
+    contributes its three stems.
+    """
+    if stem.is_triple and stem.pairs:
+        pairs = stem.pairs
+    else:
+        pairs = [(stem.position, stem.width)]
+    out = []
+    for pos, width in pairs:
+        if width == -20:
+            out.append((pos, pos))
+        elif width == -21:
+            out.append((pos - 21, pos - 21))
+        else:
+            out.append((min(pos, pos + width), max(pos, pos + width)))
+    return out
+
+
+def _set_overlaps(hint_data: PSHintData) -> list[tuple[str, str]]:
+    """Report hints that overlap within one hint set (strict, touching is fine)."""
+    issues: list[tuple[str, str]] = []
+    for hs in hint_data.hint_sets:
+        label = f"set {hs.index}" + (f" ({hs.point_tag})" if hs.point_tag else "")
+        for vertical, tag in ((True, "overlap-set-v"), (False, "overlap-set-h")):
+            seen: set[str] = set()
+            stems = []
+            for s in hs.stems:
+                if s.is_vertical == vertical and s.raw not in seen:
+                    seen.add(s.raw)
+                    stems.append(s)
+            for a, b in combinations(stems, 2):
+                if any(
+                    lo_a < hi_b and lo_b < hi_a
+                    for lo_a, hi_a in _hint_extents(a)
+                    for lo_b, hi_b in _hint_extents(b)
+                ):
+                    a, b = sorted((a, b), key=lambda s: _hint_extents(s)[0][0])
+                    issues.append((tag, f"{label}: {_fmt_hint(a)} / {_fmt_hint(b)}"))
+    return issues
+
+
+def _fmt_hint(stem) -> str:
+    """Format a hint as in autohint.v2, e.g. 'hstem 700 -20'."""
+    if stem.is_triple and stem.pairs:
+        return f"{stem.type} " + " ".join(f"{_fmt(p)} {_fmt(w)}" for p, w in stem.pairs)
+    return f"{stem.type} {_fmt(stem.position)} {_fmt(stem.width)}"
 
 
 def _find_vstem3_candidate(

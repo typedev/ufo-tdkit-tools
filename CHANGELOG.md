@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`analyze_glyph` checks overlaps within each hint set.** New tags `overlap-set-v` / `overlap-set-h` report two hints of the same set whose ranges overlap (Type 2 #5177 §4.3: undefined results). Ghosts count, with their single edge as the extent (`700 -20` → 700, `21 -21` → 0), so a ghost inside a real stem is caught; touching edges are not an overlap. The detail names the set (`set 1 (hintRef0004): hstem 663 52 / hstem 700 -20`). The existing `centric-overlap` / `overlap-v` / `overlap-h` are unchanged: they still pool all sets and skip ghosts, i.e. they flag what the optimizer will collapse, which may be legal hint replacement across sets.
+
 ## [0.4.7] - 2026-11-02
 
 ### Fixed
